@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>私人音乐中枢 · Music Hub</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --card-hover: #1f2630;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #e84142;
+      --accent-hover: #ff5556;
+      --green: #2ea043;
+      --blue: #388bfd;
+      --gold: #d29922;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at top, #1a1f2c 0%, var(--bg) 65%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      min-height: 100vh;
+      padding: 24px 16px 60px;
+    }
+    .container { max-width: 980px; margin: 0 auto; }
+
+    /* 顶部标题栏 */
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 24px; font-weight: 800; letter-spacing: 0.5px; }
+    .badge-pill {
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(232, 65, 66, 0.16);
+      color: #ff7b7c;
+      border: 1px solid rgba(232, 65, 66, 0.35);
+      font-weight: 600;
+    }
+    .mode-switch {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+    }
+    .mode-btn {
+      background: transparent;
+      color: var(--muted);
+      border: none;
+      padding: 5px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .mode-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* 实时正在播放卡片 */
+    .now-card {
+      background: linear-gradient(135deg, #1b2230 0%, #141922 100%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+    }
+    .now-left { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; }
+    .cover-box {
+      width: 68px;
+      height: 68px;
+      border-radius: 12px;
+      background: #232a36;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      color: var(--muted);
+    }
+    .cover-box img { width: 100%; height: 100%; object-fit: cover; }
+    .now-meta { flex: 1; min-width: 0; }
+    .now-status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+    .dot.live { background: #3fb950; box-shadow: 0 0 8px #3fb950; }
+    .now-title {
+      font-size: 18px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .now-sub {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .progress-wrap { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+    .progress-bar {
+      flex: 1;
+      height: 6px;
+      background: #262e3d;
+      border-radius: 999px;
+      position: relative;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #ff7b72);
+      width: 0%;
+      transition: width 0.5s linear;
+    }
+    .progress-thr {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: rgba(255,255,255,0.45);
+    }
+    .progress-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .now-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+
+    /* 导航标签 */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      background: var(--card);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 9px 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover { color: var(--text); border-color: #484f58; }
+    .tab-btn.active {
+      background: rgba(232, 65, 66, 0.15);
+      color: #ff7b7c;
+      border-color: var(--accent);
+    }
+
+    /* 通用卡片与表单 */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 22px;
+      margin-bottom: 18px;
+    }
+    .input-row { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .input-group { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 6px; }
+    .input-group label { font-size: 12px; color: var(--muted); font-weight: 600; }
+    input[type="text"], input[type="password"] {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 11px 14px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: var(--accent); }
+
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+    .btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+    .btn-ghost {
+      background: #21262d;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: #30363d; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+
+    .chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--muted); }
+    .chip {
+      background: #21262d;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 4px 11px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .chip:hover { border-color: var(--accent); color: #ff7b7c; }
+
+    /* 歌曲列表 */
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .results-header h2 { font-size: 16px; font-weight: 700; }
+    .track-list { display: flex; flex-direction: column; gap: 8px; }
+    .track-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #12171e;
+      border: 1px solid #262c36;
+      border-radius: 12px;
+      padding: 12px 16px;
+      gap: 12px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .track-item:hover { background: var(--card-hover); border-color: #3b434f; }
+    .track-left { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1; }
+    .idx { width: 24px; text-align: center; color: var(--muted); font-size: 13px; font-weight: 600; flex-shrink: 0; }
+    .track-info { min-width: 0; flex: 1; }
+    .track-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .track-artist { font-size: 12px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .track-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+
+    .tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      border: 1px solid transparent;
+    }
+    .tag-green { background: rgba(46, 160, 67, 0.16); color: #56d364; border-color: rgba(46,160,67,0.35); }
+    .tag-blue { background: rgba(56, 139, 253, 0.16); color: #79c0ff; border-color: rgba(56,139,253,0.35); }
+    .tag-gold { background: rgba(210, 153, 34, 0.16); color: #e3b341; border-color: rgba(210,153,34,0.35); }
+    .tag-muted { background: #21262d; color: var(--muted); border-color: var(--border); }
+
+    /* 统计网格 */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .stat-box {
+      background: #12171e;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .stat-num { font-size: 26px; font-weight: 800; color: var(--text); }
+    .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .mini-cover { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: #1e2430; border: 1px solid var(--border); }
+    .bar-row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 8px; }
+    .bar-label { width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+    .bar-track { flex: 1; height: 8px; background: #1c222d; border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #ff7b72); border-radius: 999px; }
+    .clock-wrap { display: flex; flex-direction: column; justify-content: space-between; gap: 14px; }
+    .clock-bars {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 5px;
+      align-items: end;
+      height: 110px;
+      padding: 14px 4px 0;
+      border-bottom: 1px solid #262e3d;
+      background: repeating-linear-gradient(to top, transparent, transparent 26px, rgba(255,255,255,0.03) 27px);
+    }
+    .clock-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; position: relative; }
+    .clock-bar {
+      width: 100%;
+      background: linear-gradient(180deg, #ff7b72 0%, var(--accent) 100%);
+      border-radius: 4px 4px 0 0;
+      min-height: 3px;
+      transition: height 0.35s ease, filter 0.2s;
+    }
+    .clock-col:hover .clock-bar { filter: brightness(1.25); }
+    .clock-ticks { display: grid; grid-template-columns: repeat(24, 1fr); gap: 5px; padding: 0 4px; margin-top: -8px; }
+    .clock-lbl { font-size: 10px; color: var(--muted); text-align: center; height: 14px; line-height: 14px; font-variant-numeric: tabular-nums; }
+    .period-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .period-chip {
+      background: #161c26;
+      border: 1px solid #262e3d;
+      border-radius: 10px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .period-name { font-size: 11px; color: var(--muted); }
+    .period-val { font-size: 14px; font-weight: 700; color: var(--text); }
+
+    .toast {
+      position: fixed;
+      bottom: 26px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1f2937;
+      color: #fff;
+      border: 1px solid #374151;
+      padding: 10px 20px;
+      border-radius: 999px;
+      font-size: 13px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s;
+      z-index: 999;
+    }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      display: inline-block;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .panel { display: none; }
+    .panel.active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 顶部栏 -->
+    <div class="topbar">
+      <div class="brand">
+        <h1>私人音乐中枢</h1>
+        <span class="badge-pill" id="topStatusPill">SMTC 实时监听中</span>
+      </div>
+      <div class="mode-switch">
+        <span style="color:var(--muted);">工作模式：</span>
+        <button class="mode-btn" id="modeRecordBtn" onclick="setMode('record')" title="只记录进本地数据库，交给外部工具打卡">只记本地库</button>
+        <button class="mode-btn" id="modeScrobbleBtn" onclick="setMode('scrobble')" title="由本程序直接打卡到 Last.fm（需退出旧打卡器防重复）">接管 Last.fm 打卡</button>
+      </div>
+    </div>
+
+    <!-- 正在播放实时横幅 -->
+    <div class="now-card">
+      <div class="now-left">
+        <div class="cover-box" id="nowCover">🎵</div>
+        <div class="now-meta">
+          <div class="now-status-row">
+            <span class="dot" id="nowDot"></span>
+            <span style="font-size:12px; color:var(--muted);" id="nowStateText">等待音乐软件播放歌曲...</span>
+            <span class="tag tag-muted" id="nowScrobbleBadge" style="display:none;"></span>
+          </div>
+          <div class="now-title" id="nowTitle">暂未检测到正在播放的曲目</div>
+          <div class="now-sub" id="nowArtist">打开网易云 / QQ音乐 / 汽水音乐 / MusicFree 等任意放一首歌，这里将实时同步</div>
+          <div class="progress-wrap" id="nowProgressWrap" style="display:none;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="nowProgressFill"></div>
+              <div class="progress-thr" id="nowProgressThr" title="打卡阈值线 (50% 或 4分钟)"></div>
+            </div>
+            <span class="progress-time" id="nowTimeText">00:00 / 00:00</span>
+          </div>
+        </div>
+      </div>
+      <div class="now-actions">
+        <button class="btn btn-sm" id="radarNowBtn" onclick="radarCurrent()" disabled>🎯 雷达这首</button>
+        <button class="btn btn-ghost btn-sm" id="loveNowBtn" onclick="loveCurrent()" disabled>❤️ 红心</button>
+      </div>
+    </div>
+
+    <!-- 导航栏 -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="radar" onclick="switchTab('radar')">🔍 单曲雷达</button>
+      <button class="tab-btn" data-tab="roam" onclick="switchTab('roam')">🌌 专属全盘漫游</button>
+      <button class="tab-btn" data-tab="stats" onclick="switchTab('stats')">📊 本地听歌库与画像</button>
+      <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ 账号与设置</button>
+    </div>
+
+    <!-- 面板 1：单曲雷达 -->
+    <div class="panel active" id="panel-radar">
+      <div class="card">
+        <div class="input-row">
+          <div class="input-group" style="flex:1.5;">
+            <label>歌曲名 或 网易云分享链接</label>
+            <input type="text" id="trackInput" placeholder="输入歌名，或直接粘贴网易云链接（官方接口直解）">
+          </div>
+          <div class="input-group" style="flex:1;">
+            <label>歌手 / 乐队（选填）</label>
+            <input type="text" id="artistInput" placeholder="例如：中島みゆき / Tommee Profitt">
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <span style="font-size:12px; color:var(--muted);">融合 Last.fm 全球协同过滤 + 网易云相似推荐 + 本地跳过记录加权</span>
+          <button class="btn" id="radarBtn" onclick="runRadar()">开始探索</button>
+        </div>
+        <div class="chips">
+          <span>快捷测试：</span>
+          <span class="chip" onclick="quickRadar('永遠の嘘をついてくれ','中島みゆき')">永遠の嘘 · 中島みゆき</span>
+          <span class="chip" onclick="quickRadar('「いちご白書」をもう一度','バンバン')">草莓白皮书 · バンバン</span>
+          <span class="chip" onclick="quickRadar('500 Miles','Peter, Paul and Mary')">500 Miles · PPM</span>
+          <span class="chip" onclick="quickRadar('Anyone','Tommee Profitt')">Anyone · Tommee Profitt</span>
+          <span class="chip" onclick="quickRadar('晴天','周杰伦')">晴天 · 周杰伦</span>
+        </div>
+      </div>
+
+      <div class="card" id="radarResultCard" style="display:none;">
+        <div class="results-header">
+          <h2 id="radarResultTitle">相似推荐</h2>
+          <button class="btn btn-ghost btn-sm" onclick="copyList('radar')">📋 复制歌单文本</button>
+        </div>
+        <div class="track-list" id="radarList"></div>
+      </div>
+    </div>
+
+    <!-- 面板 2：专属全盘漫游 -->
+    <div class="panel" id="panel-roam">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2 style="font-size:18px; margin-bottom:4px;">🌌 我的专属全盘漫游</h2>
+            <p style="font-size:13px; color:var(--muted);">自动提取你本地听完率最高的曲目与 Last.fm 常听榜单，多源合成新歌漫游清单</p>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <label style="font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="hideHeardChk" checked> 自动剔除我听过的歌
+            </label>
+            <button class="btn" id="roamBtn" onclick="runRoam(false)">✨ 生成今日漫游歌单</button>
+            <button class="btn btn-ghost" id="roamShuffleBtn" onclick="runRoam(true)" title="从你的常听与真爱曲目池中随机抽取一批新种子">🎲 换一批种子</button>
+          </div>
+        </div>
+        <div class="chips" id="roamSeedsBox" style="display:none;"></div>
+      </div>
+
+      <div class="card" id="roamResultCard" style="display:none;">
+        <div class="results-header">
+          <h2 id="roamResultTitle">为你合成的专属漫游</h2>
+          <button class="btn btn-ghost btn-sm" onclick="copyList('roam')">📋 复制全部歌单文本</button>
+        </div>
+        <div class="track-list" id="roamList"></div>
+      </div>
+    </div>
+
+    <!-- 面板 3：本地听歌库与画像 -->
+    <div class="panel" id="panel-stats">
+      <div class="card">
+        <div class="results-header">
+          <h2>📊 我的本地听歌统计</h2>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-ghost btn-sm" onclick="loadStats(7)">近 7 天</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadStats(30)">近 30 天</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadStats(3650)">全部历史</button>
+          </div>
+        </div>
+        <div class="stat-grid" id="statGrid"></div>
+        <div class="two-col" style="margin-bottom:18px;">
+          <div class="stat-box">
+            <h3 style="font-size:14px; margin-bottom:12px; color:var(--text);">🎤 常听歌手 Top 10</h3>
+            <div id="topArtistsBox"></div>
+          </div>
+          <div class="stat-box" style="display:flex; flex-direction:column; justify-content:space-between;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px; flex-wrap:wrap;">
+              <h3 style="font-size:14px; color:var(--text);">🕰 24 小时听歌生物钟</h3>
+              <span class="tag tag-muted" id="clockPeakBadge">统计中...</span>
+            </div>
+            <div class="clock-wrap" id="clockBox"></div>
+          </div>
+        </div>
+        <div class="two-col">
+          <div>
+            <h3 style="font-size:14px; margin-bottom:10px; color:#56d364;">💚 听完率最高（真爱榜）</h3>
+            <div class="track-list" id="lovedList"></div>
+          </div>
+          <div>
+            <h3 style="font-size:14px; margin-bottom:10px; color:#ff7b7c;" title="仅当累计切歌跳过 ≥ 2 次且跳过次数多于听完次数时才判定为避雷">⏭ 多次切歌跳过（累计跳过≥2次且多于听完）</h3>
+            <div class="track-list" id="skippedList"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="results-header">
+          <h2>🕒 最近播放流水账（含播放时长与切歌判定）</h2>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-ghost btn-sm" onclick="scrobblePlay(null)">📤 一键补打卡所有达标记录</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadRecent()">刷新记录</button>
+          </div>
+        </div>
+        <div class="track-list" id="recentList"></div>
+      </div>
+    </div>
+
+    <!-- 面板 4：设置与授权 -->
+    <div class="panel" id="panel-settings">
+      <div class="card">
+        <h2 style="font-size:17px; margin-bottom:6px;">1. 绑定 Last.fm 用户名（免 Key 即可开启漫游与历史导入）</h2>
+        <p style="font-size:13px; color:var(--muted); margin-bottom:14px;">
+          填写你的 Last.fm 用户名后，可立即把你在 Last.fm 上已有的打卡历史导入本地数据库，并用于「专属全盘漫游」。
+        </p>
+        <div class="input-row">
+          <div class="input-group">
+            <label>Last.fm 用户名 (Username)</label>
+            <input type="text" id="cfgUsername" placeholder="输入你的 Last.fm 用户名">
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-sm" onclick="saveUsername()">保存用户名</button>
+          <button class="btn btn-ghost btn-sm" id="importBtn" onclick="importLastfm()">📥 一键从 Last.fm 导入最近打卡历史</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:17px; margin-bottom:6px;">2. 接管 Last.fm 自动打卡（可选，替代外部 lastfm-scrobbler）</h2>
+        <p style="font-size:13px; color:var(--muted); margin-bottom:14px; line-height:1.6;">
+          如果你想关闭外部的 <code>lastfm-scrobbler</code>，完全由本程序负责打卡：<br>
+          ① 打开 <a href="https://www.last.fm/api/account/create" target="_blank" style="color:var(--blue);">Last.fm API 免费申请页</a>，Application Name 填 <code>MusicHub</code>，Callback URL 填 <code>http://127.0.0.1:8765/callback</code>；<br>
+          ② 把生成的 <b>API Key</b> 和 <b>Shared Secret</b> 填入下方保存，然后点击「前往 Last.fm 授权」。
+        </p>
+        <div class="input-row">
+          <div class="input-group">
+            <label>API Key</label>
+            <input type="text" id="cfgApiKey" placeholder="粘贴 32 位 API Key">
+          </div>
+          <div class="input-group">
+            <label>Shared Secret</label>
+            <input type="password" id="cfgApiSecret" placeholder="粘贴 32 位 Shared Secret">
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <button class="btn btn-sm" onclick="saveCreds()">保存 Key</button>
+          <a class="btn btn-ghost btn-sm" href="/api/auth/start">🔑 前往 Last.fm 网页授权</a>
+          <span id="authStatusText" style="font-size:13px; color:var(--muted);"></span>
+        </div>
+        <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+          <label style="font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="cfgScrobbleUnmatched" onchange="saveUnmatchedOpt()">
+            允许将非网易云正式曲库内容（如播客、电台、B站填词/自制音频）也打卡到 Last.fm（默认仅记入本地数据库，保护 Last.fm 账本纯净）
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:17px; margin-bottom:6px;">3. 监听播放器范围（多软件通吃）</h2>
+        <p style="font-size:13px; color:var(--muted); margin-bottom:14px;">
+          勾选你常用的桌面端播放器，无论是用哪个软件听歌，都会自动补全歌曲时长/封面、统计完播与切歌率，并支持单曲雷达与 Last.fm 打卡：
+        </p>
+        <div id="appChecksBox" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(195px, 1fr)); gap:10px; margin-bottom:14px;"></div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <button class="btn btn-sm" onclick="saveApps()">保存监听列表</button>
+          <span style="font-size:12px; color:var(--muted);">提示：QQ 音乐同时支持 SMTC 与主窗口标题双通道自动识别</span>
+        </div>
+      </div>
+
+      <div class="card" style="padding:16px 22px;">
+        <div style="font-size:13px; color:var(--muted); line-height:1.6;">
+          💡 <b>灵感与致谢</b>：本项目的 Windows SMTC 无感监听思路启发自开源项目
+          <a href="https://github.com/dagkan/lastfm-scrobbler" target="_blank" style="color:var(--blue); text-decoration:none;">dagkan/lastfm-scrobbler</a>，
+          并在此基础上针对网易云音乐专门补全了时长/专辑反查、单曲循环识别、本地切歌行为分析与双引擎相似推荐雷达。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let lastNow = null;
+    let radarTracks = [];
+    let roamTracks = [];
+
+    const APP_PRESETS = [
+      { id: 'cloudmusic.exe', label: '网易云音乐 (cloudmusic)' },
+      { id: 'qqmusic.exe', label: 'QQ 音乐 (qqmusic)' },
+      { id: 'sodamusic.exe', label: '汽水音乐 (sodamusic)' },
+      { id: 'musicfree', label: 'MusicFree' },
+      { id: 'yesplaymusic', label: 'YesPlayMusic' },
+      { id: 'listen1', label: 'Listen 1' },
+      { id: 'kugou', label: '酷狗音乐 (kugou)' },
+      { id: 'kwmusic', label: '酷我音乐 (kwmusic)' },
+      { id: 'applemusic', label: 'Apple Music' },
+      { id: 'spotify', label: 'Spotify' },
+      { id: 'foobar2000', label: 'Foobar2000' },
+    ];
+
+    function formatAppName(appId) {
+      const s = (appId || '').toLowerCase();
+      if (s.includes('cloudmusic')) return '网易云音乐';
+      if (s.includes('qqmusic')) return 'QQ 音乐';
+      if (s.includes('sodamusic') || s.includes('qishui')) return '汽水音乐';
+      if (s.includes('musicfree')) return 'MusicFree';
+      if (s.includes('yesplaymusic')) return 'YesPlayMusic';
+      if (s.includes('listen1')) return 'Listen 1';
+      if (s.includes('kugou')) return '酷狗音乐';
+      if (s.includes('kwmusic')) return '酷我音乐';
+      if (s.includes('applemusic')) return 'Apple Music';
+      if (s.includes('spotify')) return 'Spotify';
+      if (s.includes('foobar')) return 'Foobar2000';
+      return appId || '音乐播放器';
+    }
+
+    function renderAppChecks(activeApps) {
+      const box = document.getElementById('appChecksBox');
+      if (!box || box.dataset.rendered === '1') return;
+      const set = new Set((activeApps || []).map(x => x.toLowerCase()));
+      box.innerHTML = APP_PRESETS.map(p => {
+        const checked = set.size === 0 || set.has(p.id.toLowerCase()) || p.id === 'cloudmusic.exe';
+        return `
+          <label style="display:flex; align-items:center; gap:8px; background:#12171e; border:1px solid var(--border); padding:9px 12px; border-radius:10px; font-size:13px; cursor:pointer;">
+            <input type="checkbox" class="app-preset-chk" value="${p.id}" ${checked ? 'checked' : ''}>
+            <span>${p.label}</span>
+          </label>`;
+      }).join('');
+      box.dataset.rendered = '1';
+    }
+
+    async function saveApps() {
+      const apps = Array.from(document.querySelectorAll('.app-preset-chk:checked')).map(el => el.value);
+      if (apps.includes('sodamusic.exe') && !apps.includes('qishui')) apps.push('qishui');
+      if (apps.length === 0) return showToast('请至少勾选一个播放器');
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apps })
+      });
+      const d = await res.json();
+      if (d.ok) showToast(`✅ 已保存 ${apps.length} 个播放器监听规则`);
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.innerText = msg;
+      el.style.opacity = '1';
+      setTimeout(() => { el.style.opacity = '0'; }, 3200);
+    }
+
+    function fmtTime(ms) {
+      if (!ms || ms < 0) return '00:00';
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+      if (name === 'stats') { loadStats(7); loadRecent(); }
+    }
+
+    if (location.hash === '#settings') switchTab('settings');
+    if (location.search.includes('auth=ok')) showToast('🎉 Last.fm 授权成功！现在可以开启打卡模式了');
+
+    // ---------- 实时状态轮询 ----------
+    async function pollState() {
+      try {
+        const res = await fetch('/api/state');
+        const st = await res.json();
+        renderNow(st);
+      } catch (e) {}
+    }
+
+    function renderNow(st) {
+      const cfg = st.config || {};
+      document.getElementById('modeRecordBtn').classList.toggle('active', cfg.mode !== 'scrobble');
+      document.getElementById('modeScrobbleBtn').classList.toggle('active', cfg.mode === 'scrobble');
+
+      if (!document.getElementById('cfgUsername').value && cfg.username) {
+        document.getElementById('cfgUsername').value = cfg.username;
+      }
+      const unmChk = document.getElementById('cfgScrobbleUnmatched');
+      if (unmChk && 'scrobble_unmatched' in cfg && !window._savingUnm) {
+        unmChk.checked = !!cfg.scrobble_unmatched;
+      }
+      renderAppChecks(cfg.apps);
+      const authEl = document.getElementById('authStatusText');
+      if (cfg.authorized) {
+        authEl.innerHTML = `✅ 已授权绑定账号：<b>${cfg.username}</b>（待提交队列：${st.pending || 0}）`;
+        authEl.style.color = '#56d364';
+      } else if (cfg.api_key_set) {
+        authEl.innerText = '已保存 Key，请点击左侧「前往 Last.fm 网页授权」';
+      } else {
+        authEl.innerText = '当前未配置个人 API Key（处于本地记录模式）';
+      }
+
+      const now = st.now;
+      lastNow = now;
+      const dot = document.getElementById('nowDot');
+      const stateText = document.getElementById('nowStateText');
+      const badge = document.getElementById('nowScrobbleBadge');
+      const titleEl = document.getElementById('nowTitle');
+      const artistEl = document.getElementById('nowArtist');
+      const coverEl = document.getElementById('nowCover');
+      const progWrap = document.getElementById('nowProgressWrap');
+
+      if (!now) {
+        dot.className = 'dot';
+        stateText.innerText = '等待音乐软件播放歌曲...';
+        badge.style.display = 'none';
+        titleEl.innerText = '暂未检测到正在播放的曲目';
+        artistEl.innerText = '打开网易云 / QQ音乐 / 汽水音乐 / MusicFree 等任意放一首歌，这里将实时同步';
+        coverEl.innerHTML = '🎵';
+        progWrap.style.display = 'none';
+        document.getElementById('radarNowBtn').disabled = true;
+        document.getElementById('loveNowBtn').disabled = true;
+        return;
+      }
+
+      dot.className = 'dot' + (now.playing ? ' live' : '');
+      const playerLabel = formatAppName(now.app);
+      stateText.innerText = now.playing ? `正在播放 · ${playerLabel}` : `已暂停 · ${playerLabel}`;
+      titleEl.innerText = now.title;
+      artistEl.innerText = (now.artists?.join(' / ') || now.artist) + (now.album ? ` · 《${now.album}》` : '');
+      coverEl.innerHTML = now.cover ? `<img src="${now.cover}?param=140y140">` : '🎵';
+      document.getElementById('radarNowBtn').disabled = false;
+      document.getElementById('loveNowBtn').disabled = !cfg.authorized;
+
+      badge.style.display = 'inline-block';
+      const map = {
+        none: ['计时中（未达 50% 打卡线）', 'tag-muted'],
+        eligible: ['✓ 已达标（已记入本地库）', 'tag-blue'],
+        pending: ['⏳ 排队提交 Last.fm...', 'tag-gold'],
+        done: ['✓ 已打卡至 Last.fm', 'tag-green'],
+      };
+      const [btxt, bcls] = map[now.scrobble_state] || [now.scrobble_state, 'tag-muted'];
+      badge.className = 'tag ' + bcls;
+      badge.innerText = btxt;
+
+      progWrap.style.display = 'flex';
+      const dur = now.duration_ms || 240000;
+      const pct = Math.min(100, (now.played_ms / dur) * 100);
+      document.getElementById('nowProgressFill').style.width = pct.toFixed(1) + '%';
+      const thrPct = now.threshold_ms ? Math.min(100, (now.threshold_ms / dur) * 100) : 50;
+      document.getElementById('nowProgressThr').style.left = thrPct.toFixed(1) + '%';
+      document.getElementById('nowTimeText').innerText = `${fmtTime(now.played_ms)} / ${now.duration_ms ? fmtTime(now.duration_ms) : '未知'}`;
+    }
+
+    setInterval(pollState, 2000);
+    pollState();
+
+    async function setMode(mode) {
+      const res = await fetch('/api/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode })
+      });
+      const d = await res.json();
+      if (!d.ok) {
+        showToast(d.error || '切换失败');
+        switchTab('settings');
+        return;
+      }
+      showToast(mode === 'scrobble' ? '已开启 Last.fm 打卡！请记得退出外部旧打卡器以防重复' : '已切换为「只记本地库」模式');
+      pollState();
+    }
+
+    function radarCurrent() {
+      if (!lastNow) return;
+      switchTab('radar');
+      document.getElementById('trackInput').value = lastNow.title;
+      document.getElementById('artistInput').value = lastNow.artist;
+      runRadar();
+    }
+
+    async function loveCurrent() {
+      const res = await fetch('/api/love', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await res.json();
+      showToast(d.ok ? `❤️ 已在 Last.fm 红心《${lastNow?.title}》` : (d.error || '操作失败'));
+    }
+
+    // ---------- 粘贴链接官方直解 ----------
+    document.getElementById('trackInput').addEventListener('paste', () => {
+      setTimeout(async () => {
+        const val = document.getElementById('trackInput').value.trim();
+        const m = val.match(/id=(\d+)/);
+        if (m) {
+          showToast('正在通过网易云官方接口解析链接...');
+          const res = await fetch('/api/ncm/song?id=' + m[1]);
+          const s = await res.json();
+          if (s && s.title) {
+            document.getElementById('trackInput').value = s.title;
+            document.getElementById('artistInput').value = s.artist || '';
+            runRadar();
+          }
+          return;
+        }
+        if (val.includes(' - ')) {
+          const [a, t] = val.split(' - ');
+          document.getElementById('artistInput').value = a.trim();
+          document.getElementById('trackInput').value = t.trim();
+          runRadar();
+        }
+      }, 50);
+    });
+
+    function quickRadar(t, a) {
+      document.getElementById('trackInput').value = t;
+      document.getElementById('artistInput').value = a;
+      runRadar();
+    }
+
+    // ---------- 单曲雷达 ----------
+    async function runRadar() {
+      let track = document.getElementById('trackInput').value.trim();
+      let artist = document.getElementById('artistInput').value.trim();
+      if (!track) return showToast('请输入歌曲名或粘贴链接');
+
+      const btn = document.getElementById('radarBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> 双源计算中...';
+      try {
+        const m = track.match(/id=(\d+)/);
+        if (m) {
+          const s = await (await fetch('/api/ncm/song?id=' + m[1])).json();
+          if (s && s.title) {
+            track = s.title;
+            artist = s.artist || artist;
+            document.getElementById('trackInput').value = track;
+            document.getElementById('artistInput').value = artist;
+          }
+        }
+        const q = new URLSearchParams({ track, artist });
+        const d = await (await fetch('/api/radar?' + q)).json();
+        radarTracks = d.tracks || [];
+        const card = document.getElementById('radarResultCard');
+        const list = document.getElementById('radarList');
+        const titleEl = document.getElementById('radarResultTitle');
+        card.style.display = 'block';
+        list.innerHTML = '';
+
+        if (radarTracks.length > 0) {
+          titleEl.innerHTML = `基于 <b>${artist ? artist + ' · ' : ''}${track}</b> 发现 ${radarTracks.length} 首同频曲目（Last.fm ${d.sources.lastfm} + 网易云 ${d.sources.ncm}）`;
+          radarTracks.forEach((it, idx) => list.appendChild(renderTrackRow(it, idx)));
+        } else if (d.artists && d.artists.length > 0) {
+          titleEl.innerHTML = `单曲较冷门，已为你匹配与 <b>${artist}</b> 同频的 ${d.artists.length} 位音乐人：`;
+          d.artists.forEach((a, idx) => {
+            const row = document.createElement('div');
+            row.className = 'track-item';
+            row.innerHTML = `
+              <div class="track-left">
+                <span class="idx">${idx + 1}</span>
+                <div class="track-info">
+                  <div class="track-name">${a.artist}</div>
+                  <div class="track-artist">同频艺术家 · ${(a.match * 100).toFixed(0)}% 契合</div>
+                </div>
+              </div>
+              <div class="track-right">
+                <button class="btn btn-sm" onclick="playArtist('${a.artist.replace(/'/g, "\\'")}', this)">▶ 客户端播代表作</button>
+              </div>
+            `;
+            list.appendChild(row);
+          });
+        } else {
+          list.innerHTML = '<div style="padding:24px; text-align:center; color:var(--muted);">未找到相似结果，建议补充歌手名再试</div>';
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '开始探索';
+      }
+    }
+
+    function renderTrackRow(it, idx) {
+      const row = document.createElement('div');
+      row.className = 'track-item';
+      const srcBadges = (it.sources || []).map(s =>
+        s === 'lastfm' ? '<span class="tag tag-blue">Last.fm</span>' : '<span class="tag tag-green">网易云相似</span>'
+      ).join(' ');
+      let heardBadge = '';
+      if (it.heard) {
+        heardBadge = (it.heard.skipped >= 2 && it.heard.skipped > it.heard.completed)
+          ? `<span class="tag tag-gold">曾跳过 ${it.heard.skipped} 次</span>`
+          : `<span class="tag tag-muted">听过 ${it.heard.plays} 次</span>`;
+      }
+      const reasonText = it.reasons ? ` · 源于：${it.reasons.join(' / ')}` : '';
+      const safeArtist = (it.artist || '').replace(/'/g, "\\'");
+      const safeTitle = (it.title || '').replace(/'/g, "\\'");
+      const ncmId = it.ncm?.id || '';
+      const coverHtml = it.ncm?.cover
+        ? `<img class="mini-cover" src="${it.ncm.cover}?param=80y80" loading="lazy">`
+        : '';
+      const biliUrl = `https://search.bilibili.com/all?keyword=${encodeURIComponent(it.artist + ' ' + it.title)}`;
+
+      row.innerHTML = `
+        <div class="track-left">
+          <span class="idx">${idx + 1}</span>
+          ${coverHtml}
+          <div class="track-info">
+            <div class="track-name">${it.title}</div>
+            <div class="track-artist">${it.artist}${reasonText}</div>
+          </div>
+        </div>
+        <div class="track-right">
+          ${heardBadge}
+          ${srcBadges}
+          <button class="btn btn-sm" onclick="playSong('${safeArtist}','${safeTitle}','${ncmId}',this)">▶ 客户端播</button>
+          <a class="btn btn-ghost btn-sm" href="${biliUrl}" target="_blank">B站</a>
+        </div>
+      `;
+      return row;
+    }
+
+    async function playSong(artist, title, knownId, btn) {
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+      navigator.clipboard.writeText(`${artist} ${title}`).catch(() => {});
+      try {
+        let id = knownId;
+        if (!id) {
+          const q = new URLSearchParams({ track: title, artist });
+          const m = await (await fetch('/api/ncm/match?' + q)).json();
+          id = m?.id;
+        }
+        if (id) {
+          await fetch('/api/play', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+          });
+          showToast(`🎧 已在网易云客户端直接播放《${title}》`);
+        } else {
+          showToast(`网易云未收录 ${artist}《${title}》（无版权），已复制歌名，可点右侧【B站】收听`);
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    }
+
+    async function playArtist(artist, btn) {
+      btn.disabled = true;
+      const res = await fetch('/api/play_artist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist })
+      });
+      const d = await res.json();
+      btn.disabled = false;
+      if (d.ok) {
+        showToast(`🎧 已在客户端播放 ${artist} 的《${d.song.title}》`);
+      } else {
+        showToast(`未在网易云找到 ${artist} 的可播曲目`);
+      }
+    }
+
+    // ---------- 专属全盘漫游 ----------
+    async function runRoam(shuffle = false) {
+      const btn = document.getElementById('roamBtn');
+      const sbtn = document.getElementById('roamShuffleBtn');
+      const hide = document.getElementById('hideHeardChk').checked ? '1' : '0';
+      const user = document.getElementById('cfgUsername').value.trim();
+      btn.disabled = true;
+      if (sbtn) sbtn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> 正在聚合你的听歌基因...';
+      try {
+        const d = await (await fetch(`/api/roam?hide_heard=${hide}&shuffle=${shuffle ? '1' : '0'}&user=${encodeURIComponent(user)}`)).json();
+        roamTracks = d.tracks || [];
+        const seedsBox = document.getElementById('roamSeedsBox');
+        const card = document.getElementById('roamResultCard');
+        const list = document.getElementById('roamList');
+        card.style.display = 'block';
+        list.innerHTML = '';
+
+        if (d.seeds && d.seeds.length > 0) {
+          seedsBox.style.display = 'flex';
+          seedsBox.innerHTML = '<span>本次漫游灵感种子（点击可单曲雷达）：</span>' +
+            d.seeds.map(s => `<span class="chip" onclick="quickRadar('${(s.title||'').replace(/'/g,"\\'")}','${(s.artist||'').replace(/'/g,"\\'")}')">${s.artist} · ${s.title}</span>`).join('');
+        }
+        document.getElementById('roamResultTitle').innerText = `为你合成 ${roamTracks.length} 首专属漫游推荐`;
+        if (roamTracks.length === 0) {
+          list.innerHTML = '<div style="padding:24px; text-align:center; color:var(--muted);">当前种子不足。请先用网易云放几首歌，或在「⚙️ 账号与设置」里填入你的 Last.fm 用户名！</div>';
+        } else {
+          roamTracks.forEach((it, idx) => list.appendChild(renderTrackRow(it, idx)));
+        }
+      } finally {
+        btn.disabled = false;
+        if (sbtn) sbtn.disabled = false;
+        btn.innerText = '✨ 生成今日漫游歌单';
+      }
+    }
+
+    // ---------- 统计与本地流水 ----------
+    async function loadStats(days) {
+      const d = await (await fetch('/api/stats?days=' + days)).json();
+      const t = d.totals || {};
+      const mins = Math.round((t.ms || 0) / 60000);
+      document.getElementById('statGrid').innerHTML = `
+        <div class="stat-box"><div class="stat-num">${t.n || 0}</div><div class="stat-label">累计播放次数（近 ${days} 天）</div></div>
+        <div class="stat-box"><div class="stat-num">${mins} 分钟</div><div class="stat-label">累计专注听歌时长</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:#56d364;">${t.c || 0}</div><div class="stat-label">完整听完次数 (≥85%)</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:#ff7b7c;">${t.s || 0}</div><div class="stat-label">切歌跳过次数 (<30%)</div></div>
+      `;
+
+      const arts = d.top_artists || [];
+      const maxArt = Math.max(1, ...arts.map(a => a.n || 0));
+      document.getElementById('topArtistsBox').innerHTML = arts.length === 0
+        ? '<div style="color:var(--muted); font-size:13px;">暂无记录</div>'
+        : arts.map(a => `
+          <div class="bar-row">
+            <span class="bar-label" title="${a.artist}">${a.artist}</span>
+            <div class="bar-track"><div class="bar-fill" style="width:${((a.n / maxArt) * 100).toFixed(1)}%"></div></div>
+            <span style="font-size:12px; color:var(--muted); width:46px; text-align:right;">${a.n} 次</span>
+          </div>`).join('');
+
+      const hrs = d.hours || {};
+      const maxHr = Math.max(1, ...Object.values(hrs));
+      let barsHtml = '';
+      let ticksHtml = '';
+      let peakH = -1, peakCnt = 0;
+      const periods = [
+        { name: '🌅 清晨 06-11', sum: 0, range: [6, 7, 8, 9, 10, 11] },
+        { name: '☀️ 午后 12-17', sum: 0, range: [12, 13, 14, 15, 16, 17] },
+        { name: '🌆 夜晚 18-23', sum: 0, range: [18, 19, 20, 21, 22, 23] },
+        { name: '🌙 深夜 00-05', sum: 0, range: [0, 1, 2, 3, 4, 5] },
+      ];
+      for (let h = 0; h < 24; h++) {
+        const cnt = hrs[h] || 0;
+        if (cnt > peakCnt) { peakCnt = cnt; peakH = h; }
+        const px = cnt ? Math.max(10, Math.round((cnt / maxHr) * 88)) : 3;
+        barsHtml += `
+          <div class="clock-col" title="${String(h).padStart(2,'0')}:00 - ${String(h).padStart(2,'0')}:59 · 播放 ${cnt} 首">
+            <div class="clock-bar" style="height:${px}px; opacity:${cnt ? 1 : 0.18}"></div>
+          </div>`;
+        ticksHtml += `<span class="clock-lbl">${h % 3 === 0 ? String(h).padStart(2, '0') : ''}</span>`;
+      }
+      periods.forEach(p => { p.sum = p.range.reduce((acc, h) => acc + (hrs[h] || 0), 0); });
+      const peakBadge = document.getElementById('clockPeakBadge');
+      if (peakBadge) {
+        peakBadge.innerText = peakCnt > 0
+          ? `峰值时段 ${String(peakH).padStart(2,'0')}:00（${peakCnt} 首）`
+          : '暂无时段数据';
+      }
+      document.getElementById('clockBox').innerHTML = `
+        <div class="clock-bars">${barsHtml}</div>
+        <div class="clock-ticks">${ticksHtml}</div>
+        <div class="period-grid">
+          ${periods.map(p => `
+            <div class="period-chip">
+              <span class="period-name">${p.name}</span>
+              <span class="period-val">${p.sum} <span style="font-size:11px;font-weight:400;color:var(--muted);">首</span></span>
+            </div>`).join('')}
+        </div>
+      `;
+
+      // 前端兜底过滤：即使后台未重启，也只把“累计跳过≥2次且多于听完次数”的歌列为避雷
+      const filteredSkipped = (d.skipped || []).filter(r => (r.s || 0) >= 2 && (r.s || 0) > (r.c || 0));
+
+      const renderMini = (arr, isSkip) => arr.length === 0
+        ? `<div style="color:var(--muted); font-size:13px; padding:12px;">${isSkip ? '🎉 暂无多次切歌跳过的曲目（偶然切歌 1 次不会误判为避雷）' : '暂无数据，多听几首就会自动生成'}</div>`
+        : arr.map((r, i) => {
+            const st = (r.title || '').replace(/'/g, "\\'");
+            const sa = (r.artist || '').replace(/'/g, "\\'");
+            return `
+          <div class="track-item">
+            <div class="track-left">
+              <span class="idx">${i + 1}</span>
+              <div class="track-info">
+                <div class="track-name">${r.title}</div>
+                <div class="track-artist">${r.artist}</div>
+              </div>
+            </div>
+            <div class="track-right">
+              <span class="tag ${isSkip ? 'tag-gold' : 'tag-green'}">${isSkip ? `跳过 ${r.s} 次 / 听完 ${r.c || 0} 次` : `听完 ${r.c} 次`}</span>
+              ${isSkip ? `<button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px;" onclick="clearSkip('${st}','${sa}')">解除</button>` : ''}
+            </div>
+          </div>`;
+          }).join('');
+
+      document.getElementById('lovedList').innerHTML = renderMini(d.loved || [], false);
+      document.getElementById('skippedList').innerHTML = renderMini(filteredSkipped, true);
+    }
+
+    async function clearSkip(title, artist) {
+      await fetch('/api/play/clear_skip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, artist })
+      });
+      showToast(`已解除《${title}》的切歌避雷标记`);
+      loadStats(7);
+    }
+
+    async function loadRecent() {
+      const rows = await (await fetch('/api/recent?limit=40')).json();
+      const el = document.getElementById('recentList');
+      if (!rows.length) {
+        el.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:12px;">暂无记录</div>';
+        return;
+      }
+      el.innerHTML = rows.map((r, i) => {
+        const dt = new Date(r.started_at * 1000).toLocaleString();
+        const badge = r.skipped
+          ? '<span class="tag tag-gold">⏭ 切歌跳过</span>'
+          : (r.completed ? '<span class="tag tag-green">💚 完整听完</span>' : '<span class="tag tag-muted">部分播放</span>');
+        const sc = r.scrobble_state === 'done'
+          ? '<span class="tag tag-blue">Last.fm 已打卡</span>'
+          : (r.scrobble_state === 'pending'
+            ? '<span class="tag tag-gold">排队打卡中</span>'
+            : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px;" onclick="scrobblePlay(${r.id})">补打卡</button>`);
+        return `
+          <div class="track-item">
+            <div class="track-left">
+              <span class="idx">${i + 1}</span>
+              <div class="track-info">
+                <div class="track-name">${r.title}</div>
+                <div class="track-artist">${r.artist} · ${dt} · 听了 ${fmtTime(r.played_ms)}</div>
+              </div>
+            </div>
+            <div class="track-right">
+              ${badge}
+              ${sc}
+              <button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px; color:var(--muted);" title="删除此条记录" onclick="deletePlay(${r.id})">×</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function scrobblePlay(id) {
+      const res = await fetch('/api/play/scrobble', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(id ? { id } : {})
+      });
+      const d = await res.json();
+      if (!d.ok) {
+        showToast(d.error || '补打卡失败');
+        return;
+      }
+      showToast(d.queued > 0 ? `已提交 ${d.queued} 条记录至 Last.fm 打卡队列` : '没有需要补打卡的达标记录');
+      loadRecent();
+    }
+
+    async function deletePlay(id) {
+      await fetch('/api/play/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      showToast('已删除该条播放记录');
+      loadRecent();
+      loadStats(7);
+    }
+
+    async function saveUnmatchedOpt() {
+      window._savingUnm = true;
+      try {
+        const scrobble_unmatched = document.getElementById('cfgScrobbleUnmatched').checked;
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scrobble_unmatched })
+        });
+        const d = await res.json();
+        if (!d.config || !('scrobble_unmatched' in d.config)) {
+          showToast('⚠️ 后台托盘仍是旧版进程！请右键右下角托盘图标点「退出」，再双击【启动私人音乐中枢.vbs】');
+          return;
+        }
+        showToast(scrobble_unmatched ? '已开启：非正式曲库也将打卡到 Last.fm' : '已开启保护：非正式曲库仅记入本地库');
+      } finally {
+        setTimeout(() => { window._savingUnm = false; }, 2500);
+      }
+    }
+
+    // ---------- 设置与导入 ----------
+    async function saveUsername() {
+      const username = document.getElementById('cfgUsername').value.trim();
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      showToast('已保存 Last.fm 用户名：' + username);
+      pollState();
+    }
+
+    async function importLastfm() {
+      const user = document.getElementById('cfgUsername').value.trim();
+      if (!user) return showToast('请先在上方输入框填写你的 Last.fm 用户名');
+      const btn = document.getElementById('importBtn');
+      btn.disabled = true;
+      btn.innerText = '正在同步 Last.fm 记录...';
+      try {
+        const res = await fetch('/api/import_lastfm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast(`🎉 成功从 Last.fm 同步 ${d.imported} 条历史记录（共扫描 ${d.total_fetched} 条）`);
+        } else {
+          showToast(d.error || '导入失败');
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '📥 一键从 Last.fm 导入最近打卡历史';
+      }
+    }
+
+    async function saveCreds() {
+      const api_key = document.getElementById('cfgApiKey').value.trim();
+      const api_secret = document.getElementById('cfgApiSecret').value.trim();
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key, api_secret })
+      });
+      showToast('已保存 API Key 与 Secret，请点击「前往 Last.fm 网页授权」');
+      pollState();
+    }
+
+    function copyList(kind) {
+      const arr = kind === 'roam' ? roamTracks : radarTracks;
+      if (!arr.length) return;
+      const txt = arr.map((t, i) => `${i + 1}. ${t.artist} - ${t.title}`).join('\n');
+      navigator.clipboard.writeText(txt).then(() => showToast(`已复制 ${arr.length} 首曲目到剪贴板！`));
+    }
+  </script>
+</body>
+</html>
