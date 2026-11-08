@@ -13,6 +13,14 @@ from logging.handlers import RotatingFileHandler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# PyInstaller 单文件打包环境下，必须在任何 clr/webview 导入之前显式加载 Python.NET 运行时
+if getattr(sys, "frozen", False):
+    try:
+        from pythonnet import load
+        load("netfx")
+    except Exception:
+        pass
+
 from config import DATA_DIR, Config  # noqa: E402
 from db import DB  # noqa: E402
 

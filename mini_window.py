@@ -13,6 +13,13 @@ import sys
 import threading
 import time
 
+if getattr(sys, "frozen", False):
+    try:
+        from pythonnet import load
+        load("netfx")
+    except Exception:
+        pass
+
 log = logging.getLogger("mini_window")
 
 MUTEX_NAME = "Global\\MusicHub_Mini_Widget_SingleInstance_Mutex"
