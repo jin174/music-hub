@@ -327,7 +327,7 @@ unsafe extern "system" fn widget_wnd_proc(
 impl WidgetWindow {
     fn on_btn_like(&self) {
         let app = self.app.clone();
-        tokio::spawn(async move {
+        self.app.rt.spawn(async move {
             if let Some(now) = app.monitor.snapshot() {
                 let fb_map = app.db.get_feedback_map();
                 let key = (
@@ -347,7 +347,7 @@ impl WidgetWindow {
 
     fn on_btn_dislike(&self) {
         let app = self.app.clone();
-        tokio::spawn(async move {
+        self.app.rt.spawn(async move {
             if let Some(now) = app.monitor.snapshot() {
                 let fb_map = app.db.get_feedback_map();
                 let key = (
@@ -367,7 +367,7 @@ impl WidgetWindow {
 
     fn on_btn_play(&self) {
         let app = self.app.clone();
-        tokio::spawn(async move {
+        self.app.rt.spawn(async move {
             if let Some(now) = app.monitor.snapshot() {
                 if let Some(nid) = now.ncm_id {
                     App::play_in_client(nid);
@@ -514,7 +514,7 @@ impl WidgetWindow {
             let url = cover_url.to_string();
             let tx = self.cover_tx.clone();
 
-            tokio::spawn(async move {
+            self.app.rt.spawn(async move {
                 let client = reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(8))
                     .build()

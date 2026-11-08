@@ -143,6 +143,7 @@ pub struct App {
     pub scrobbler: Scrobbler,
     pub monitor: Monitor,
     pub widget_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<WidgetCommand>>>>,
+    pub rt: tokio::runtime::Handle,
 }
 
 impl App {
@@ -151,6 +152,7 @@ impl App {
         let lf = Lastfm::new(cfg.clone(), db.clone());
         let scrobbler = Scrobbler::new(cfg.clone(), db.clone(), lf.clone());
         let monitor = Monitor::new(cfg.clone(), db.clone(), ncm.clone(), scrobbler.clone());
+        let rt = tokio::runtime::Handle::current();
 
         Self {
             cfg,
@@ -160,6 +162,7 @@ impl App {
             scrobbler,
             monitor,
             widget_tx: Arc::new(tokio::sync::RwLock::new(None)),
+            rt,
         }
     }
 
