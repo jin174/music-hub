@@ -74,7 +74,9 @@ class Config:
                 pass
         self.save()
 
-    def get(self, key):
+    def get(self, key, default=None):
+        if default is not None:
+            return self.data.get(key, default)
         return self.data.get(key, DEFAULTS.get(key))
 
     def update(self, **kwargs):

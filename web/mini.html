@@ -8,7 +8,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      background: #000000;
+      background: transparent !important;
       color: #e6edf3;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       overflow: hidden;
@@ -18,22 +18,32 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 4px;
+      padding: 3px;
     }
 
     /* 真正极致纤薄的灵动岛药丸卡片 */
     .island {
       width: 100%;
       height: 100%;
-      background: #0a0d14;
-      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(10, 13, 20, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.16);
       border-radius: 999px;
-      padding: 5px 12px 5px 6px;
+      padding: 4px 10px 4px 6px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+      gap: 8px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), inset 0 1px 1px rgba(255, 255, 255, 0.15);
       position: relative;
+      -webkit-app-region: drag;
+      cursor: grab;
+      backdrop-filter: blur(20px);
+    }
+    .island:active {
+      cursor: grabbing;
+    }
+
+    button, a, input, .no-drag {
+      -webkit-app-region: no-drag !important;
     }
 
     /* 黑胶唱片 / 专辑封面 */
@@ -91,6 +101,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      max-width: 130px;
     }
     .track-artist {
       font-size: 11px;
@@ -98,6 +109,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      max-width: 80px;
     }
 
     /* 律动音波小动画 */
@@ -126,7 +138,7 @@
     .progress-line {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
     .prog-track {
       flex: 1;
@@ -153,16 +165,17 @@
     .actions-strip {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
       flex-shrink: 0;
+      -webkit-app-region: no-drag;
     }
     .pill-btn {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.1);
       color: #8b949e;
       border-radius: 50%;
-      width: 24px;
-      height: 24px;
+      width: 22px;
+      height: 22px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -171,11 +184,12 @@
       transition: all 0.15s ease;
       padding: 0;
       line-height: 1;
+      -webkit-app-region: no-drag;
     }
     .pill-btn:hover {
-      background: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.2);
       color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.3);
+      border-color: rgba(255, 255, 255, 0.35);
       transform: scale(1.08);
     }
     .pill-btn.active-like {
@@ -188,13 +202,18 @@
       border-color: #e84142;
       color: #e84142;
     }
+    .pill-btn.close-btn:hover {
+      background: rgba(232, 65, 66, 0.4);
+      color: #ff7b72;
+      border-color: #e84142;
+    }
 
     .toast {
       position: absolute;
-      top: -26px;
+      top: -24px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.9);
+      background: rgba(0, 0, 0, 0.95);
       border: 1px solid rgba(255, 255, 255, 0.2);
       color: #fff;
       font-size: 10px;
@@ -207,7 +226,7 @@
       z-index: 100;
     }
     .toast.show {
-      top: 6px;
+      top: 4px;
       opacity: 1;
     }
   </style>
@@ -244,6 +263,7 @@
       <button class="pill-btn" id="dislikeBtn" title="🚫 避雷" onclick="toggleMiniFeedback('dislike')">🚫</button>
       <button class="pill-btn" id="playBtn" title="▶ 客户端开播" onclick="replayClient()">▶</button>
       <button class="pill-btn" title="⤢ 打开控制台" onclick="openMainConsole()">⤢</button>
+      <button class="pill-btn close-btn" title="✕ 关闭挂件" onclick="closeMini()">✕</button>
     </div>
 
     <div id="toast" class="toast"></div>
@@ -268,6 +288,14 @@
       t.innerText = msg;
       t.className = 'toast show';
       setTimeout(() => t.className = 'toast', 1500);
+    }
+
+    function closeMini() {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.close) {
+        window.pywebview.api.close();
+      } else {
+        window.close();
+      }
     }
 
     async function poll() {

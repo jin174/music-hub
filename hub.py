@@ -32,6 +32,18 @@ def setup_logging(console):
 
 
 def main():
+    if "--mini" in sys.argv:
+        from mini_window import open_mini_gui
+        port = 8765
+        for arg in sys.argv:
+            if arg.startswith("--port="):
+                try:
+                    port = int(arg.split("=")[1])
+                except ValueError:
+                    pass
+        open_mini_gui(port)
+        return
+
     console = "--console" in sys.argv
     setup_logging(console)
     log = logging.getLogger("hub")

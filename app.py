@@ -420,9 +420,23 @@ class App:
             ])
         return output.getvalue().encode("utf-8-sig")
 
-    # ---------- 启动无地址栏独立灵动岛小窗 ----------
+    # ---------- 启动桌面独立灵动岛悬浮挂件 ----------
     def open_mini_window(self):
         import subprocess
+        port = self.cfg.get("port") or 8765
+        # 1. 优先启动完全脱离浏览器的原生悬浮挂件 (pywebview)
+        try:
+            if getattr(sys, "frozen", False):
+                subprocess.Popen([sys.executable, "--mini", f"--port={port}"])
+                return True
+            script = os.path.join(BASE_DIR, "mini_window.py")
+            if os.path.isfile(script):
+                subprocess.Popen([sys.executable, script, f"--port={port}"])
+                return True
+        except Exception as e:
+            log.warning("launch native mini window failed: %s", e)
+
+        # 2. 兜底方案：尝试 Edge App 模式（无地址栏精简窗口）
         edge = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
         chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
         exe = edge if os.path.exists(edge) else (chrome if os.path.exists(chrome) else None)
@@ -432,12 +446,14 @@ class App:
                 subprocess.Popen([
                     exe,
                     f"--app={url}",
-                    "--window-size=380,78",
+                    "--window-size=390,72",
                     "--window-position=1480,920",
                 ])
                 return True
             except Exception as e:
                 log.warning("launch mini app mode failed: %s", e)
+
+        # 3. 最终兜底：浏览器打开
         import webbrowser
         webbrowser.open(url)
         return True
