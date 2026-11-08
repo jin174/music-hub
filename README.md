@@ -57,6 +57,9 @@ pip install -r requirements.txt
   2. 将 `API Key` 与 `Shared Secret` 填入「⚙️ 账号与设置」并点击「🔑 前往 Last.fm 网页授权」。
   3. 授权成功后，在页面右上角或托盘右键菜单切换为 **「接管 Last.fm 打卡」**（请同时退出外部旧打卡器以防重复打卡）。
 
+> [!NOTE]
+> 未填写个人 API Key 时，相似歌曲等只读查询会使用一个在 Last.fm 社区广泛流传的公共示例 Key。它由很多项目共用，可能被限流或停用；建议花 1 分钟[免费申请自己的 Key](https://www.last.fm/api/account/create)，雷达会更稳定。
+
 ---
 
 ## 📂 目录结构

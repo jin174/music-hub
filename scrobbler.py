@@ -19,11 +19,22 @@ class Scrobbler:
         self.lf = lastfm
         self._event = threading.Event()
         self._stop = threading.Event()
+        # 后台线程与手动补打卡可能同时 flush，加锁防止同一批记录被重复提交
+        self._flush_lock = threading.Lock()
         self.last_error = None
         self.last_ok = None
 
     def kick(self):
         self._event.set()
+
+    def flush_async(self):
+        """手动补打卡用：不受“只记本地库”模式限制，立即在后台提交一次"""
+        def go():
+            try:
+                self.flush()
+            except Exception:
+                log.exception("manual flush failed")
+        threading.Thread(target=go, daemon=True).start()
 
     def stop(self):
         self._stop.set()
@@ -42,6 +53,10 @@ class Scrobbler:
                     log.exception("flush failed")
 
     def flush(self):
+        with self._flush_lock:
+            self._flush_locked()
+
+    def _flush_locked(self):
         while True:
             rows = self.db.pending_scrobbles(50)
             if not rows:

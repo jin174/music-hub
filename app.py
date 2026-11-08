@@ -279,7 +279,16 @@ class App:
             return {"ok": False, "error": "请先在「⚙️ 账号与设置」完成 Last.fm 授权"}
         min_ts = int(time.time()) - 14 * 86400 + 3600
         if play_id:
-            self.db.update_play(int(play_id), scrobble_state="pending")
+            rows = self.db.q(
+                "SELECT id, started_at, scrobble_state FROM plays WHERE id=?", (int(play_id),))
+            if not rows:
+                return {"ok": False, "error": "记录不存在"}
+            r = rows[0]
+            if r["scrobble_state"] in ("done", "pending"):
+                return {"ok": False, "error": "这条记录已打卡或正在排队"}
+            if r["started_at"] <= min_ts:
+                return {"ok": False, "error": "超过 14 天的记录 Last.fm 不再接受"}
+            self.db.update_play(r["id"], scrobble_state="pending")
             count = 1
         else:
             rows = self.db.q(
@@ -291,7 +300,7 @@ class App:
                 self.db.update_play(r["id"], scrobble_state="pending")
             count = len(rows)
         if count > 0:
-            self.scrobbler.flush()
+            self.scrobbler.flush_async()  # 后台提交，不阻塞网页请求；flush 内部有锁防重复
         return {"ok": True, "queued": count}
 
     def delete_play(self, play_id):

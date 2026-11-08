@@ -604,6 +604,13 @@
     let radarTracks = [];
     let roamTracks = [];
 
+    // 所有来自歌名 / 歌手 / 接口的文本插入 innerHTML 前都必须转义，防止特殊字符破坏页面或注入脚本
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[c]);
+    }
+
     const APP_PRESETS = [
       { id: 'cloudmusic.exe', label: '网易云音乐 (cloudmusic)' },
       { id: 'qqmusic.exe', label: 'QQ 音乐 (qqmusic)' },
@@ -746,7 +753,7 @@
       stateText.innerText = now.playing ? `正在播放 · ${playerLabel}` : `已暂停 · ${playerLabel}`;
       titleEl.innerText = now.title;
       artistEl.innerText = (now.artists?.join(' / ') || now.artist) + (now.album ? ` · 《${now.album}》` : '');
-      coverEl.innerHTML = now.cover ? `<img src="${now.cover}?param=140y140">` : '🎵';
+      coverEl.innerHTML = now.cover ? `<img src="${esc(now.cover)}?param=140y140">` : '🎵';
       document.getElementById('radarNowBtn').disabled = false;
       document.getElementById('loveNowBtn').disabled = !cfg.authorized;
 
@@ -864,10 +871,10 @@
         list.innerHTML = '';
 
         if (radarTracks.length > 0) {
-          titleEl.innerHTML = `基于 <b>${artist ? artist + ' · ' : ''}${track}</b> 发现 ${radarTracks.length} 首同频曲目（Last.fm ${d.sources.lastfm} + 网易云 ${d.sources.ncm}）`;
+          titleEl.innerHTML = `基于 <b>${esc(artist ? artist + ' · ' : '')}${esc(track)}</b> 发现 ${radarTracks.length} 首同频曲目（Last.fm ${d.sources.lastfm} + 网易云 ${d.sources.ncm}）`;
           radarTracks.forEach((it, idx) => list.appendChild(renderTrackRow(it, idx)));
         } else if (d.artists && d.artists.length > 0) {
-          titleEl.innerHTML = `单曲较冷门，已为你匹配与 <b>${artist}</b> 同频的 ${d.artists.length} 位音乐人：`;
+          titleEl.innerHTML = `单曲较冷门，已为你匹配与 <b>${esc(artist)}</b> 同频的 ${d.artists.length} 位音乐人：`;
           d.artists.forEach((a, idx) => {
             const row = document.createElement('div');
             row.className = 'track-item';
@@ -875,12 +882,12 @@
               <div class="track-left">
                 <span class="idx">${idx + 1}</span>
                 <div class="track-info">
-                  <div class="track-name">${a.artist}</div>
+                  <div class="track-name">${esc(a.artist)}</div>
                   <div class="track-artist">同频艺术家 · ${(a.match * 100).toFixed(0)}% 契合</div>
                 </div>
               </div>
               <div class="track-right">
-                <button class="btn btn-sm" onclick="playArtist('${a.artist.replace(/'/g, "\\'")}', this)">▶ 客户端播代表作</button>
+                <button class="btn btn-sm" data-artist="${esc(a.artist)}" onclick="playArtist(this.dataset.artist, this)">▶ 客户端播代表作</button>
               </div>
             `;
             list.appendChild(row);
@@ -906,12 +913,10 @@
           ? `<span class="tag tag-gold">曾跳过 ${it.heard.skipped} 次</span>`
           : `<span class="tag tag-muted">听过 ${it.heard.plays} 次</span>`;
       }
-      const reasonText = it.reasons ? ` · 源于：${it.reasons.join(' / ')}` : '';
-      const safeArtist = (it.artist || '').replace(/'/g, "\\'");
-      const safeTitle = (it.title || '').replace(/'/g, "\\'");
-      const ncmId = it.ncm?.id || '';
+      const reasonText = it.reasons ? ` · 源于：${esc(it.reasons.join(' / '))}` : '';
+      const ncmId = it.ncm?.id ? String(Number(it.ncm.id)) : '';
       const coverHtml = it.ncm?.cover
-        ? `<img class="mini-cover" src="${it.ncm.cover}?param=80y80" loading="lazy">`
+        ? `<img class="mini-cover" src="${esc(it.ncm.cover)}?param=80y80" loading="lazy">`
         : '';
       const biliUrl = `https://search.bilibili.com/all?keyword=${encodeURIComponent(it.artist + ' ' + it.title)}`;
 
@@ -920,15 +925,16 @@
           <span class="idx">${idx + 1}</span>
           ${coverHtml}
           <div class="track-info">
-            <div class="track-name">${it.title}</div>
-            <div class="track-artist">${it.artist}${reasonText}</div>
+            <div class="track-name">${esc(it.title)}</div>
+            <div class="track-artist">${esc(it.artist)}${reasonText}</div>
           </div>
         </div>
         <div class="track-right">
           ${heardBadge}
           ${srcBadges}
-          <button class="btn btn-sm" onclick="playSong('${safeArtist}','${safeTitle}','${ncmId}',this)">▶ 客户端播</button>
-          <a class="btn btn-ghost btn-sm" href="${biliUrl}" target="_blank">B站</a>
+          <button class="btn btn-sm" data-artist="${esc(it.artist)}" data-title="${esc(it.title)}" data-id="${ncmId}"
+            onclick="playSong(this.dataset.artist, this.dataset.title, this.dataset.id, this)">▶ 客户端播</button>
+          <a class="btn btn-ghost btn-sm" href="${esc(biliUrl)}" target="_blank">B站</a>
         </div>
       `;
       return row;
@@ -999,7 +1005,7 @@
         if (d.seeds && d.seeds.length > 0) {
           seedsBox.style.display = 'flex';
           seedsBox.innerHTML = '<span>本次漫游灵感种子（点击可单曲雷达）：</span>' +
-            d.seeds.map(s => `<span class="chip" onclick="quickRadar('${(s.title||'').replace(/'/g,"\\'")}','${(s.artist||'').replace(/'/g,"\\'")}')">${s.artist} · ${s.title}</span>`).join('');
+            d.seeds.map(s => `<span class="chip" data-title="${esc(s.title)}" data-artist="${esc(s.artist)}" onclick="quickRadar(this.dataset.title, this.dataset.artist)">${esc(s.artist)} · ${esc(s.title)}</span>`).join('');
         }
         document.getElementById('roamResultTitle').innerText = `为你合成 ${roamTracks.length} 首专属漫游推荐`;
         if (roamTracks.length === 0) {
@@ -1032,7 +1038,7 @@
         ? '<div style="color:var(--muted); font-size:13px;">暂无记录</div>'
         : arts.map(a => `
           <div class="bar-row">
-            <span class="bar-label" title="${a.artist}">${a.artist}</span>
+            <span class="bar-label" title="${esc(a.artist)}">${esc(a.artist)}</span>
             <div class="bar-track"><div class="bar-fill" style="width:${((a.n / maxArt) * 100).toFixed(1)}%"></div></div>
             <span style="font-size:12px; color:var(--muted); width:46px; text-align:right;">${a.n} 次</span>
           </div>`).join('');
@@ -1082,24 +1088,20 @@
 
       const renderMini = (arr, isSkip) => arr.length === 0
         ? `<div style="color:var(--muted); font-size:13px; padding:12px;">${isSkip ? '🎉 暂无多次切歌跳过的曲目（偶然切歌 1 次不会误判为避雷）' : '暂无数据，多听几首就会自动生成'}</div>`
-        : arr.map((r, i) => {
-            const st = (r.title || '').replace(/'/g, "\\'");
-            const sa = (r.artist || '').replace(/'/g, "\\'");
-            return `
+        : arr.map((r, i) => `
           <div class="track-item">
             <div class="track-left">
               <span class="idx">${i + 1}</span>
               <div class="track-info">
-                <div class="track-name">${r.title}</div>
-                <div class="track-artist">${r.artist}</div>
+                <div class="track-name">${esc(r.title)}</div>
+                <div class="track-artist">${esc(r.artist)}</div>
               </div>
             </div>
             <div class="track-right">
               <span class="tag ${isSkip ? 'tag-gold' : 'tag-green'}">${isSkip ? `跳过 ${r.s} 次 / 听完 ${r.c || 0} 次` : `听完 ${r.c} 次`}</span>
-              ${isSkip ? `<button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px;" onclick="clearSkip('${st}','${sa}')">解除</button>` : ''}
+              ${isSkip ? `<button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px;" data-title="${esc(r.title)}" data-artist="${esc(r.artist)}" onclick="clearSkip(this.dataset.title, this.dataset.artist)">解除</button>` : ''}
             </div>
-          </div>`;
-          }).join('');
+          </div>`).join('');
 
       document.getElementById('lovedList').innerHTML = renderMini(d.loved || [], false);
       document.getElementById('skippedList').innerHTML = renderMini(filteredSkipped, true);
@@ -1131,20 +1133,20 @@
           ? '<span class="tag tag-blue">Last.fm 已打卡</span>'
           : (r.scrobble_state === 'pending'
             ? '<span class="tag tag-gold">排队打卡中</span>'
-            : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px;" onclick="scrobblePlay(${r.id})">补打卡</button>`);
+            : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px;" onclick="scrobblePlay(${Number(r.id)})">补打卡</button>`);
         return `
           <div class="track-item">
             <div class="track-left">
               <span class="idx">${i + 1}</span>
               <div class="track-info">
-                <div class="track-name">${r.title}</div>
-                <div class="track-artist">${r.artist} · ${dt} · 听了 ${fmtTime(r.played_ms)}</div>
+                <div class="track-name">${esc(r.title)}</div>
+                <div class="track-artist">${esc(r.artist)} · ${dt} · 听了 ${fmtTime(r.played_ms)}</div>
               </div>
             </div>
             <div class="track-right">
               ${badge}
               ${sc}
-              <button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px; color:var(--muted);" title="删除此条记录" onclick="deletePlay(${r.id})">×</button>
+              <button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:11px; color:var(--muted);" title="删除此条记录" onclick="deletePlay(${Number(r.id)})">×</button>
             </div>
           </div>
         `;
