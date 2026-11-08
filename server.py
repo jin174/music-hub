@@ -183,6 +183,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(a.clear_skip(body.get("title", ""), body.get("artist", "")))
             if url.path == "/api/feedback":
                 return self._json(a.feedback(body.get("title", ""), body.get("artist", ""), body.get("action", "")))
+            if url.path == "/api/open_mini":
+                return self._json({"ok": a.open_mini_window()})
             if url.path == "/api/play/scrobble":
                 return self._json(a.manual_scrobble(body.get("id")))
             if url.path == "/api/import_lastfm":

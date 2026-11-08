@@ -1509,10 +1509,14 @@
     }
 
     // ---------- 🪟 迷你挂件与外部生态 ----------
-    function openMiniWindow() {
-      const w = 380, h = 125;
+    async function openMiniWindow() {
+      try {
+        const res = await (await fetch('/api/open_mini', { method: 'POST' })).json();
+        if (res.ok) return;
+      } catch (e) {}
+      const w = 380, h = 64;
       const left = Math.max(0, (window.screen?.availWidth || 1920) - w - 24);
-      const top = Math.max(0, (window.screen?.availHeight || 1080) - h - 40);
+      const top = Math.max(0, (window.screen?.availHeight || 1080) - h - 36);
       window.open(
         '/mini',
         'MusicHubMini',

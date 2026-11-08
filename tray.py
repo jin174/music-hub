@@ -62,7 +62,7 @@ def run_tray(app, on_quit):
         webbrowser.open(app.base_url)
 
     def open_mini(icon=None, item=None):
-        webbrowser.open(app.base_url + "/mini")
+        app.open_mini_window()
 
     def set_mode(mode):
         def handler(icon, item):

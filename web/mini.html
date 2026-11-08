@@ -3,138 +3,164 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Music Hub · 桌面迷你挂件</title>
+  <meta name="theme-color" content="#000000">
+  <title>Music Hub · 动态灵动岛</title>
   <style>
-    :root {
-      --bg: #0d1117;
-      --card: #161b22;
-      --border: #30363d;
-      --text: #e6edf3;
-      --muted: #8b949e;
-      --accent: #e84142;
-      --green: #2ea043;
-      --blue: #388bfd;
-    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
+    html, body {
+      background: #000000;
+      color: #e6edf3;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       overflow: hidden;
       user-select: none;
-      height: 100vh;
+      width: 100%;
+      height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 6px;
+      padding: 4px;
     }
-    .mini-card {
+
+    /* 真正极致纤薄的灵动岛药丸卡片 */
+    .island {
       width: 100%;
       height: 100%;
-      background: rgba(22, 27, 34, 0.95);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 8px 12px;
+      background: #0a0d14;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+      padding: 5px 12px 5px 6px;
       display: flex;
       align-items: center;
       gap: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.12);
       position: relative;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     }
-    .cover-wrap {
-      width: 50px;
-      height: 50px;
-      border-radius: 8px;
-      overflow: hidden;
-      background: #21262d;
+
+    /* 黑胶唱片 / 专辑封面 */
+    .cover-disc {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: #161b22;
+      border: 1px solid rgba(255, 255, 255, 0.15);
       flex-shrink: 0;
+      overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
     }
-    .cover-img {
+    .cover-disc.spinning img {
+      animation: spin 16s linear infinite;
+    }
+    .cover-disc img {
       width: 100%;
       height: 100%;
       object-fit: cover;
+      border-radius: 50%;
     }
     .cover-fallback {
-      font-size: 20px;
-      color: var(--muted);
+      font-size: 16px;
+      color: #8b949e;
     }
-    .live-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      position: absolute;
-      top: 4px;
-      left: 4px;
-      background: #8b949e;
-      box-shadow: 0 0 6px rgba(0,0,0,0.5);
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
-    .live-dot.playing {
-      background: #56d364;
-      box-shadow: 0 0 8px #56d364;
-    }
-    .info-wrap {
+
+    /* 中间曲目与进度 */
+    .center-content {
       flex: 1;
       min-width: 0;
       display: flex;
       flex-direction: column;
       gap: 3px;
+      justify-content: center;
     }
-    .title-row {
-      font-size: 13px;
+    .meta-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .track-title {
+      font-size: 12px;
       font-weight: 600;
-      white-space: nowrap;
+      color: #ffffff;
       overflow: hidden;
       text-overflow: ellipsis;
-      color: var(--text);
+      white-space: nowrap;
     }
-    .artist-row {
+    .track-artist {
       font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
+      color: #8b949e;
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .progress-bar-wrap {
-      width: 100%;
-      height: 4px;
-      background: #21262d;
+
+    /* 律动音波小动画 */
+    .sound-wave {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 10px;
+      flex-shrink: 0;
+    }
+    .sound-wave span {
+      width: 2px;
+      background: #56d364;
+      border-radius: 1px;
+      animation: wave 0.8s ease-in-out infinite alternate;
+    }
+    .sound-wave span:nth-child(1) { height: 3px; animation-delay: 0.1s; }
+    .sound-wave span:nth-child(2) { height: 9px; animation-delay: 0.3s; }
+    .sound-wave span:nth-child(3) { height: 5px; animation-delay: 0.2s; }
+    @keyframes wave {
+      0% { height: 2px; }
+      100% { height: 10px; }
+    }
+
+    /* 进度条与时间 */
+    .progress-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .prog-track {
+      flex: 1;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.12);
       border-radius: 2px;
       overflow: hidden;
-      margin-top: 3px;
     }
-    .progress-bar-fill {
+    .prog-fill {
       height: 100%;
-      background: linear-gradient(90deg, #ff7b72, var(--accent));
       width: 0%;
+      background: linear-gradient(90deg, #ff7b72, #e84142);
+      border-radius: 2px;
       transition: width 0.3s ease;
     }
-    .time-row {
-      display: flex;
-      justify-content: space-between;
+    .time-lbl {
       font-size: 9px;
-      color: var(--muted);
-      margin-top: 1px;
+      color: #8b949e;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
     }
-    .actions-wrap {
+
+    /* 右侧单排水平微按钮 */
+    .actions-strip {
       display: flex;
-      flex-direction: column;
+      align-items: center;
       gap: 4px;
       flex-shrink: 0;
     }
-    .btn-row {
-      display: flex;
-      gap: 4px;
-      align-items: center;
-    }
-    .mini-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      border-radius: 5px;
+    .pill-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #8b949e;
+      border-radius: 50%;
       width: 24px;
       height: 24px;
       display: inline-flex;
@@ -142,72 +168,84 @@
       justify-content: center;
       cursor: pointer;
       font-size: 11px;
-      transition: all 0.15s;
+      transition: all 0.15s ease;
       padding: 0;
+      line-height: 1;
     }
-    .mini-btn:hover {
-      background: #21262d;
-      color: var(--text);
-      border-color: var(--text);
+    .pill-btn:hover {
+      background: rgba(255, 255, 255, 0.18);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: scale(1.08);
     }
-    .mini-btn.active-like {
-      background: rgba(46, 160, 67, 0.25);
-      border-color: var(--green);
+    .pill-btn.active-like {
+      background: rgba(46, 160, 67, 0.3);
+      border-color: #2ea043;
       color: #56d364;
     }
-    .mini-btn.active-dislike {
-      background: rgba(232, 65, 66, 0.25);
-      border-color: var(--accent);
-      color: var(--accent);
+    .pill-btn.active-dislike {
+      background: rgba(232, 65, 66, 0.3);
+      border-color: #e84142;
+      color: #e84142;
     }
+
     .toast {
       position: absolute;
-      bottom: 6px;
+      top: -26px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0,0,0,0.85);
-      border: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       color: #fff;
       font-size: 10px;
-      padding: 3px 8px;
-      border-radius: 6px;
+      padding: 2px 10px;
+      border-radius: 999px;
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.2s;
+      transition: all 0.2s ease;
       white-space: nowrap;
-      z-index: 10;
+      z-index: 100;
     }
-    .toast.show { opacity: 1; }
+    .toast.show {
+      top: 6px;
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
-  <div class="mini-card" id="card">
-    <div class="cover-wrap">
-      <img id="coverImg" class="cover-img" src="" style="display:none;">
-      <span id="coverFallback" class="cover-fallback">🎵</span>
-      <div id="liveDot" class="live-dot"></div>
+  <div class="island">
+    <!-- 左侧微缩黑胶封面 -->
+    <div class="cover-disc" id="coverDisc">
+      <img id="coverImg" src="" style="display:none;">
+      <span id="coverFallback" class="cover-fallback">♪</span>
     </div>
-    <div class="info-wrap">
-      <div id="trackTitle" class="title-row">等待音乐软件开播...</div>
-      <div id="trackArtist" class="artist-row">支持网易云 / QQ / 汽水音乐等</div>
-      <div class="progress-bar-wrap">
-        <div id="progFill" class="progress-bar-fill"></div>
+
+    <!-- 中间信息与极细进度 -->
+    <div class="center-content">
+      <div class="meta-line">
+        <span class="track-title" id="trackTitle">等待播放曲目...</span>
+        <span style="color:#6e7681; font-size:10px;">·</span>
+        <span class="track-artist" id="trackArtist">打开任意音乐软件</span>
+        <div class="sound-wave" id="soundWave" style="display:none;">
+          <span></span><span></span><span></span>
+        </div>
       </div>
-      <div class="time-row">
-        <span id="timeCur">00:00</span>
-        <span id="timeTotal">00:00</span>
-      </div>
-    </div>
-    <div class="actions-wrap">
-      <div class="btn-row">
-        <button id="likeBtn" class="mini-btn" title="👍 喜欢" onclick="toggleMiniFeedback('like')">👍</button>
-        <button id="dislikeBtn" class="mini-btn" title="🚫 避雷" onclick="toggleMiniFeedback('dislike')">🚫</button>
-      </div>
-      <div class="btn-row">
-        <button id="playBtn" class="mini-btn" title="▶ 客户端重播" onclick="replayClient()">▶</button>
-        <button class="mini-btn" title="⤢ 打开主控制台" onclick="openMainConsole()">⤢</button>
+      <div class="progress-line">
+        <div class="prog-track">
+          <div class="prog-fill" id="progFill"></div>
+        </div>
+        <span class="time-lbl" id="timeText">00:00 / 00:00</span>
       </div>
     </div>
+
+    <!-- 右侧水平微图标组 -->
+    <div class="actions-strip">
+      <button class="pill-btn" id="likeBtn" title="👍 喜欢" onclick="toggleMiniFeedback('like')">👍</button>
+      <button class="pill-btn" id="dislikeBtn" title="🚫 避雷" onclick="toggleMiniFeedback('dislike')">🚫</button>
+      <button class="pill-btn" id="playBtn" title="▶ 客户端开播" onclick="replayClient()">▶</button>
+      <button class="pill-btn" title="⤢ 打开控制台" onclick="openMainConsole()">⤢</button>
+    </div>
+
     <div id="toast" class="toast"></div>
   </div>
 
@@ -216,12 +254,6 @@
     let localPlayedMs = 0;
     let isPlaying = false;
     let durMs = 0;
-
-    function esc(s) {
-      return String(s ?? '').replace(/[&<>"']/g, c => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-      })[c]);
-    }
 
     function fmtTime(ms) {
       if (!ms || ms < 0) return '00:00';
@@ -235,7 +267,7 @@
       const t = document.getElementById('toast');
       t.innerText = msg;
       t.className = 'toast show';
-      setTimeout(() => t.className = 'toast', 1600);
+      setTimeout(() => t.className = 'toast', 1500);
     }
 
     async function poll() {
@@ -244,47 +276,46 @@
         const st = await res.json();
         curState = st;
         render(st);
-      } catch (e) {
-        // network or server sleep
-      }
+      } catch (e) {}
     }
 
     function render(st) {
       const now = st.now;
-      const dot = document.getElementById('liveDot');
-      const titleEl = document.getElementById('trackTitle');
-      const artistEl = document.getElementById('trackArtist');
+      const disc = document.getElementById('coverDisc');
       const coverImg = document.getElementById('coverImg');
       const coverFb = document.getElementById('coverFallback');
-      const progFill = document.getElementById('progFill');
-      const timeCur = document.getElementById('timeCur');
-      const timeTotal = document.getElementById('timeTotal');
+      const titleEl = document.getElementById('trackTitle');
+      const artistEl = document.getElementById('trackArtist');
+      const wave = document.getElementById('soundWave');
 
       if (!now) {
-        dot.className = 'live-dot';
-        titleEl.innerText = '等待播放曲目...';
-        artistEl.innerText = '打开任意播放器播放即可';
+        disc.className = 'cover-disc';
         coverImg.style.display = 'none';
-        coverFb.style.display = 'block';
-        progFill.style.width = '0%';
-        timeCur.innerText = '00:00';
-        timeTotal.innerText = '00:00';
+        coverFb.style.display = 'inline';
+        titleEl.innerText = '等待音乐开播...';
+        artistEl.innerText = '网易云/QQ/汽水音乐等';
+        wave.style.display = 'none';
         isPlaying = false;
+        durMs = 0;
+        localPlayedMs = 0;
+        updateProgress();
         return;
       }
 
       isPlaying = Boolean(now.playing);
-      dot.className = isPlaying ? 'live-dot playing' : 'live-dot';
+      disc.className = isPlaying ? 'cover-disc spinning' : 'cover-disc';
+      wave.style.display = isPlaying ? 'inline-flex' : 'none';
+
       titleEl.innerText = now.title || '未知曲目';
       artistEl.innerText = now.artist || '未知歌手';
 
       if (now.cover) {
-        coverImg.src = now.cover + '?param=100y100';
+        coverImg.src = now.cover + '?param=80y80';
         coverImg.style.display = 'block';
         coverFb.style.display = 'none';
       } else {
         coverImg.style.display = 'none';
-        coverFb.style.display = 'block';
+        coverFb.style.display = 'inline';
       }
 
       durMs = now.duration_ms || 0;
@@ -293,20 +324,17 @@
     }
 
     function updateProgress() {
-      const progFill = document.getElementById('progFill');
-      const timeCur = document.getElementById('timeCur');
-      const timeTotal = document.getElementById('timeTotal');
-      timeCur.innerText = fmtTime(localPlayedMs);
-      timeTotal.innerText = fmtTime(durMs);
+      const fill = document.getElementById('progFill');
+      const timeText = document.getElementById('timeText');
+      timeText.innerText = `${fmtTime(localPlayedMs)} / ${fmtTime(durMs)}`;
       if (durMs > 0) {
         const pct = Math.min(100, Math.max(0, (localPlayedMs / durMs) * 100));
-        progFill.style.width = pct.toFixed(1) + '%';
+        fill.style.width = pct.toFixed(1) + '%';
       } else {
-        progFill.style.width = isPlaying ? '50%' : '0%';
+        fill.style.width = isPlaying ? '40%' : '0%';
       }
     }
 
-    // 每一秒本地平滑前进一步
     setInterval(() => {
       if (isPlaying && durMs > 0 && localPlayedMs < durMs) {
         localPlayedMs += 1000;
@@ -328,32 +356,32 @@
         })).json();
         if (res.ok) {
           if (act === 'like') {
-            btn.className = 'mini-btn active-like';
-            document.getElementById('dislikeBtn').className = 'mini-btn';
+            btn.className = 'pill-btn active-like';
+            document.getElementById('dislikeBtn').className = 'pill-btn';
             showToast('已标记 👍 喜欢');
           } else if (act === 'dislike') {
-            btn.className = 'mini-btn active-dislike';
-            document.getElementById('likeBtn').className = 'mini-btn';
+            btn.className = 'pill-btn active-dislike';
+            document.getElementById('likeBtn').className = 'pill-btn';
             showToast('已加入 🚫 避雷');
           } else {
-            btn.className = 'mini-btn';
-            showToast('已取消偏好标记');
+            btn.className = 'pill-btn';
+            showToast('已取消标记');
           }
         }
       } catch (e) {
-        showToast('操作失败');
+        showToast('请求失败');
       }
     }
 
     async function replayClient() {
       const now = curState?.now;
-      if (!now || !now.ncm_id) return showToast('无网易云ID');
+      if (!now || !now.ncm_id) return showToast('未匹配到网易云ID');
       await fetch('/api/play', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: now.ncm_id })
       });
-      showToast('已唤起客户端播放');
+      showToast('已在客户端播放');
     }
 
     function openMainConsole() {
@@ -365,7 +393,7 @@
     }
 
     poll();
-    setInterval(poll, 1500);
+    setInterval(poll, 1200);
   </script>
 </body>
 </html>

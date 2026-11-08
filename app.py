@@ -419,3 +419,25 @@ class App:
                 comp, skip, scrobble_desc, r.get("app", ""), r.get("ncm_id") or ""
             ])
         return output.getvalue().encode("utf-8-sig")
+
+    # ---------- 启动无地址栏独立灵动岛小窗 ----------
+    def open_mini_window(self):
+        import subprocess
+        edge = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+        exe = edge if os.path.exists(edge) else (chrome if os.path.exists(chrome) else None)
+        url = f"{self.base_url}/mini"
+        if exe:
+            try:
+                subprocess.Popen([
+                    exe,
+                    f"--app={url}",
+                    "--window-size=380,78",
+                    "--window-position=1480,920",
+                ])
+                return True
+            except Exception as e:
+                log.warning("launch mini app mode failed: %s", e)
+        import webbrowser
+        webbrowser.open(url)
+        return True
