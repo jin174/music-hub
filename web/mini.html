@@ -3,40 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#000000">
   <title>Music Hub · 动态灵动岛</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      background: transparent !important;
+      background: #010101 !important; /* 绑定系统抠图穿透色，彻底去除矩形底框 */
       color: #e6edf3;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
       overflow: hidden;
       user-select: none;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 3px;
     }
 
-    /* 真正极致纤薄的灵动岛药丸卡片 */
+    /* 极致纤细、高拟物度的高级感灵动岛药丸 */
     .island {
       width: 100%;
       height: 100%;
-      background: rgba(10, 13, 20, 0.95);
-      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: linear-gradient(180deg, rgba(26, 31, 42, 0.98) 0%, rgba(11, 14, 20, 0.98) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
       border-radius: 999px;
-      padding: 4px 10px 4px 6px;
+      padding: 0 10px 0 6px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+      gap: 9px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.16);
       position: relative;
       -webkit-app-region: drag;
       cursor: grab;
-      backdrop-filter: blur(20px);
     }
     .island:active {
       cursor: grabbing;
@@ -46,23 +43,23 @@
       -webkit-app-region: no-drag !important;
     }
 
-    /* 黑胶唱片 / 专辑封面 */
+    /* 精致黑胶唱片 / 专辑封面 */
     .cover-disc {
-      width: 44px;
-      height: 44px;
+      width: 38px;
+      height: 38px;
       border-radius: 50%;
-      background: #161b22;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: radial-gradient(circle at center, #1b212c 30%, #000 31%, #262c36 34%, #12161f 65%, #05070a 100%);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       flex-shrink: 0;
       overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
     }
     .cover-disc.spinning img {
-      animation: spin 16s linear infinite;
+      animation: spin 14s linear infinite;
     }
     .cover-disc img {
       width: 100%;
@@ -71,14 +68,25 @@
       border-radius: 50%;
     }
     .cover-fallback {
-      font-size: 16px;
+      font-size: 14px;
       color: #8b949e;
+    }
+    /* 黑胶唱片中心金属轴心 */
+    .cover-disc::after {
+      content: "";
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #000;
+      border: 1.5px solid rgba(255, 255, 255, 0.5);
+      pointer-events: none;
     }
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
 
-    /* 中间曲目与进度 */
+    /* 中间曲目与进度条 */
     .center-content {
       flex: 1;
       min-width: 0;
@@ -90,7 +98,7 @@
     .meta-line {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       white-space: nowrap;
       overflow: hidden;
     }
@@ -101,7 +109,12 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 130px;
+      max-width: 125px;
+      letter-spacing: 0.2px;
+    }
+    .dot-sep {
+      color: #586069;
+      font-size: 10px;
     }
     .track-artist {
       font-size: 11px;
@@ -109,32 +122,35 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 80px;
+      max-width: 85px;
     }
 
-    /* 律动音波小动画 */
+    /* 律动音波小动画（4 柱式荧光绿） */
     .sound-wave {
       display: inline-flex;
       align-items: flex-end;
       gap: 2px;
-      height: 10px;
+      height: 11px;
       flex-shrink: 0;
+      margin-left: 2px;
     }
     .sound-wave span {
       width: 2px;
-      background: #56d364;
-      border-radius: 1px;
+      background: linear-gradient(180deg, #56d364, #2ea043);
+      border-radius: 2px;
+      box-shadow: 0 0 4px rgba(86, 211, 100, 0.5);
       animation: wave 0.8s ease-in-out infinite alternate;
     }
     .sound-wave span:nth-child(1) { height: 3px; animation-delay: 0.1s; }
-    .sound-wave span:nth-child(2) { height: 9px; animation-delay: 0.3s; }
-    .sound-wave span:nth-child(3) { height: 5px; animation-delay: 0.2s; }
+    .sound-wave span:nth-child(2) { height: 10px; animation-delay: 0.35s; }
+    .sound-wave span:nth-child(3) { height: 6px; animation-delay: 0.2s; }
+    .sound-wave span:nth-child(4) { height: 8px; animation-delay: 0.45s; }
     @keyframes wave {
       0% { height: 2px; }
-      100% { height: 10px; }
+      100% { height: 11px; }
     }
 
-    /* 进度条与时间 */
+    /* 极细微进度条与时间 */
     .progress-line {
       display: flex;
       align-items: center;
@@ -142,8 +158,8 @@
     }
     .prog-track {
       flex: 1;
-      height: 3px;
-      background: rgba(255, 255, 255, 0.12);
+      height: 2.5px;
+      background: rgba(255, 255, 255, 0.1);
       border-radius: 2px;
       overflow: hidden;
     }
@@ -152,16 +168,18 @@
       width: 0%;
       background: linear-gradient(90deg, #ff7b72, #e84142);
       border-radius: 2px;
+      box-shadow: 0 0 6px rgba(232, 65, 66, 0.6);
       transition: width 0.3s ease;
     }
     .time-lbl {
-      font-size: 9px;
-      color: #8b949e;
+      font-size: 9.5px;
+      color: #7d8590;
       font-variant-numeric: tabular-nums;
       flex-shrink: 0;
+      letter-spacing: -0.3px;
     }
 
-    /* 右侧单排水平微按钮 */
+    /* 右侧精致微按钮条 */
     .actions-strip {
       display: flex;
       align-items: center;
@@ -170,37 +188,40 @@
       -webkit-app-region: no-drag;
     }
     .pill-btn {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: #8b949e;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      color: #9da7b3;
       border-radius: 50%;
-      width: 22px;
-      height: 22px;
+      width: 21px;
+      height: 21px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      font-size: 11px;
       transition: all 0.15s ease;
       padding: 0;
-      line-height: 1;
       -webkit-app-region: no-drag;
     }
     .pill-btn:hover {
       background: rgba(255, 255, 255, 0.2);
       color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.35);
+      border-color: rgba(255, 255, 255, 0.3);
       transform: scale(1.08);
+    }
+    .pill-btn svg {
+      pointer-events: none;
     }
     .pill-btn.active-like {
       background: rgba(46, 160, 67, 0.3);
       border-color: #2ea043;
       color: #56d364;
+      box-shadow: 0 0 8px rgba(46, 160, 67, 0.4);
     }
     .pill-btn.active-dislike {
       background: rgba(232, 65, 66, 0.3);
       border-color: #e84142;
-      color: #e84142;
+      color: #ff7b72;
+      box-shadow: 0 0 8px rgba(232, 65, 66, 0.4);
     }
     .pill-btn.close-btn:hover {
       background: rgba(232, 65, 66, 0.4);
@@ -208,22 +229,24 @@
       border-color: #e84142;
     }
 
+    /* 内部微气泡 Toast */
     .toast {
       position: absolute;
       top: -24px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.95);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(10, 13, 20, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.25);
       color: #fff;
       font-size: 10px;
       padding: 2px 10px;
       border-radius: 999px;
       pointer-events: none;
       opacity: 0;
-      transition: all 0.2s ease;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       white-space: nowrap;
       z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.6);
     }
     .toast.show {
       top: 4px;
@@ -243,10 +266,10 @@
     <div class="center-content">
       <div class="meta-line">
         <span class="track-title" id="trackTitle">等待播放曲目...</span>
-        <span style="color:#6e7681; font-size:10px;">·</span>
-        <span class="track-artist" id="trackArtist">打开任意音乐软件</span>
+        <span class="dot-sep">·</span>
+        <span class="track-artist" id="trackArtist">打开音乐软件即可</span>
         <div class="sound-wave" id="soundWave" style="display:none;">
-          <span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span>
         </div>
       </div>
       <div class="progress-line">
@@ -257,13 +280,38 @@
       </div>
     </div>
 
-    <!-- 右侧水平微图标组 -->
+    <!-- 右侧水平微图标组（矢量 SVG 呈现） -->
     <div class="actions-strip">
-      <button class="pill-btn" id="likeBtn" title="👍 喜欢" onclick="toggleMiniFeedback('like')">👍</button>
-      <button class="pill-btn" id="dislikeBtn" title="🚫 避雷" onclick="toggleMiniFeedback('dislike')">🚫</button>
-      <button class="pill-btn" id="playBtn" title="▶ 客户端开播" onclick="replayClient()">▶</button>
-      <button class="pill-btn" title="⤢ 打开控制台" onclick="openMainConsole()">⤢</button>
-      <button class="pill-btn close-btn" title="✕ 关闭挂件" onclick="closeMini()">✕</button>
+      <button class="pill-btn" id="likeBtn" title="喜欢 (加权推荐)" onclick="toggleMiniFeedback('like')">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8.864.046C7.908-.193 7.02.53 6.956 1.466c-.072 1.051-.23 2.016-.428 2.59-.125.36-.479 1.013-1.04 1.639-.557.623-1.282 1.178-2.131 1.41C2.885 7.24 2.5 7.734 2.5 8.35v5.15c0 .616.385 1.11.857 1.245.85.232 1.574.787 2.131 1.41.561.626.915 1.28 1.04 1.639.199.574.356 1.539.428 2.59.064.936.952 1.66 1.908 1.42 1.077-.27 2.136-.88 2.92-1.745.787-.869 1.216-1.99 1.216-3.059V8.35c0-1.07-.429-2.19-1.216-3.06-.784-.864-1.843-1.474-2.92-1.744z"/>
+        </svg>
+      </button>
+
+      <button class="pill-btn" id="dislikeBtn" title="避雷 (永久拉黑)" onclick="toggleMiniFeedback('dislike')">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+          <path d="M4.646 4.646a.5.5 0 0 1 .708 0L11.354 10.646a.5.5 0 0 1-.708.708L4.646 5.354a.5.5 0 0 1 0-.708z"/>
+        </svg>
+      </button>
+
+      <button class="pill-btn" id="playBtn" title="在网易云客户端打开" onclick="replayClient()">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M11.596 8.697l-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393z"/>
+        </svg>
+      </button>
+
+      <button class="pill-btn" title="唤醒后台控制台" onclick="openMainConsole()">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" d="M5.828 10.172a.5.5 0 0 0-.707 0l-4.096 4.096V11.5a.5.5 0 0 0-1 0v3.975a.5.5 0 0 0 .5.5H4.5a.5.5 0 0 0 0-1H1.732l4.096-4.096a.5.5 0 0 0 0-.707zm4.344-4.344a.5.5 0 0 0 .707 0l4.096-4.096V4.5a.5.5 0 1 0 1 0V.525a.5.5 0 0 0-.5-.5H11.5a.5.5 0 0 0 0 1h2.768l-4.096 4.096a.5.5 0 0 0 0 .707z"/>
+        </svg>
+      </button>
+
+      <button class="pill-btn close-btn" title="关闭挂件" onclick="closeMini()">
+        <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854z"/>
+        </svg>
+      </button>
     </div>
 
     <div id="toast" class="toast"></div>

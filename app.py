@@ -26,6 +26,7 @@ class App:
         self.scrobbler = Scrobbler(cfg, db, self.lf)
         self.monitor = Monitor(cfg, db, self.ncm, self.scrobbler)
         self.pool = ThreadPoolExecutor(max_workers=4)
+        self._mini_proc = None
 
     @property
     def base_url(self):
@@ -424,15 +425,20 @@ class App:
     # ---------- 启动桌面独立灵动岛悬浮挂件 ----------
     def open_mini_window(self):
         import subprocess
+        # 单例保护：如果已有正在运行的挂件子进程，直接返回
+        if self._mini_proc and self._mini_proc.poll() is None:
+            log.info("mini widget process is already alive, skip duplicate launch")
+            return True
+
         port = self.cfg.get("port") or 8765
         # 1. 优先启动完全脱离浏览器的原生悬浮挂件 (pywebview)
         try:
             if getattr(sys, "frozen", False):
-                subprocess.Popen([sys.executable, "--mini", f"--port={port}"])
+                self._mini_proc = subprocess.Popen([sys.executable, "--mini", f"--port={port}"])
                 return True
             script = os.path.join(BASE_DIR, "mini_window.py")
             if os.path.isfile(script):
-                subprocess.Popen([sys.executable, script, f"--port={port}"])
+                self._mini_proc = subprocess.Popen([sys.executable, script, f"--port={port}"])
                 return True
         except Exception as e:
             log.warning("launch native mini window failed: %s", e)
@@ -444,11 +450,11 @@ class App:
         url = f"{self.base_url}/mini"
         if exe:
             try:
-                subprocess.Popen([
+                self._mini_proc = subprocess.Popen([
                     exe,
                     f"--app={url}",
-                    "--window-size=390,72",
-                    "--window-position=1480,920",
+                    "--window-size=380,54",
+                    "--window-position=1480,940",
                 ])
                 return True
             except Exception as e:
