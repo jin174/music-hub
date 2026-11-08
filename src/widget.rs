@@ -1,10 +1,11 @@
 use crate::app::{App, WidgetCommand};
 use fontdue::{Font, FontSettings};
 use std::path::Path;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use tiny_skia::{
-    Color, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point,
-    Rect, Transform,
+    Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint, PathBuilder, Pattern,
+    Pixmap, Point, RadialGradient, Rect, SpreadMode, Transform,
 };
 use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
@@ -12,31 +13,35 @@ use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    ReleaseCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetSystemMetrics, PostQuitMessage, RegisterClassW, SendMessageW,
-    ShowWindow, TranslateMessage, UpdateLayeredWindow, CS_HREDRAW, CS_VREDRAW,
-    HTCAPTION, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA,
-    WM_DESTROY, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_NCLBUTTONDOWN, WM_TIMER, WNDCLASSW,
+    GetSystemMetrics, LoadCursorW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor,
+    ShowWindow, TranslateMessage, UpdateLayeredWindow, CS_HREDRAW, CS_VREDRAW, HTCAPTION,
+    IDC_ARROW, IDC_HAND, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA,
+    WM_DESTROY, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_NCLBUTTONDOWN, WM_SETCURSOR, WM_TIMER, WNDCLASSW,
     WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-pub const WIDGET_WIDTH: u32 = 384;
-pub const WIDGET_HEIGHT: u32 = 56;
+const WM_MOUSELEAVE: u32 = 0x02A3;
 
-const PILL_X: f32 = 2.0;
-const PILL_Y: f32 = 2.0;
+pub const WIDGET_WIDTH: u32 = 396;
+pub const WIDGET_HEIGHT: u32 = 66;
+
+const PILL_X: f32 = 8.0;
+const PILL_Y: f32 = 5.0;
 const PILL_W: f32 = 380.0;
 const PILL_H: f32 = 52.0;
 const PILL_RADIUS: f32 = 26.0;
 
-// Button regions: (x, y, w, h)
-const BTN_LIKE: (f32, f32, f32, f32) = (252.0, 18.0, 20.0, 20.0);
-const BTN_DISLIKE: (f32, f32, f32, f32) = (276.0, 18.0, 20.0, 20.0);
-const BTN_PLAY: (f32, f32, f32, f32) = (300.0, 18.0, 20.0, 20.0);
-const BTN_CONSOLE: (f32, f32, f32, f32) = (324.0, 18.0, 20.0, 20.0);
-const BTN_CLOSE: (f32, f32, f32, f32) = (348.0, 18.0, 20.0, 20.0);
+// Button regions: (cx, cy, r)
+const BTN_LIKE: (f32, f32, f32) = (260.0, 31.0, 10.5);
+const BTN_DISLIKE: (f32, f32, f32) = (284.0, 31.0, 10.5);
+const BTN_PLAY: (f32, f32, f32) = (308.0, 31.0, 10.5);
+const BTN_CONSOLE: (f32, f32, f32) = (332.0, 31.0, 10.5);
+const BTN_CLOSE: (f32, f32, f32) = (356.0, 31.0, 10.5);
 
 #[derive(Clone)]
 struct FontCache {
@@ -74,6 +79,8 @@ pub struct WidgetWindow {
     anim_frame: u32,
     last_cover_url: String,
     cover_pixmap: Option<Pixmap>,
+    cover_tx: Sender<(String, Pixmap)>,
+    cover_rx: Receiver<(String, Pixmap)>,
 }
 
 pub fn spawn_widget_thread(
@@ -88,10 +95,12 @@ pub fn spawn_widget_thread(
             let hinstance = HINSTANCE(std::ptr::null_mut());
 
             unsafe {
+                let default_cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
                 let wc = WNDCLASSW {
                     style: CS_HREDRAW | CS_VREDRAW,
                     lpfnWndProc: Some(widget_wnd_proc),
                     hInstance: hinstance,
+                    hCursor: default_cursor,
                     lpszClassName: class_name,
                     ..Default::default()
                 };
@@ -119,6 +128,8 @@ pub fn spawn_widget_thread(
                 .expect("Failed to create widget window");
 
                 let fonts = FontCache::new();
+                let (cover_tx, cover_rx) = channel();
+
                 let widget = Box::new(WidgetWindow {
                     app: app.clone(),
                     hwnd,
@@ -127,9 +138,10 @@ pub fn spawn_widget_thread(
                     anim_frame: 0,
                     last_cover_url: String::new(),
                     cover_pixmap: None,
+                    cover_tx,
+                    cover_rx,
                 });
 
-                // Store pointer into window user data
                 windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(
                     hwnd,
                     windows::Win32::UI::WindowsAndMessaging::GWLP_USERDATA,
@@ -147,7 +159,6 @@ pub fn spawn_widget_thread(
 
                 let mut msg = MSG::default();
                 while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-                    // Check commands from channel
                     while let Ok(cmd) = cmd_rx.try_recv() {
                         match cmd {
                             WidgetCommand::Show => {
@@ -197,15 +208,46 @@ unsafe extern "system" fn widget_wnd_proc(
     match msg {
         WM_TIMER => {
             widget.anim_frame = widget.anim_frame.wrapping_add(1);
+
+            // Pull any downloaded album cover artwork
+            while let Ok((url, px)) = widget.cover_rx.try_recv() {
+                if url == widget.last_cover_url {
+                    widget.cover_pixmap = Some(px);
+                }
+            }
+
             widget.render_and_flush();
             LRESULT(0)
         }
+        WM_SETCURSOR => {
+            // Fix busy spinning wheel cursor!
+            let cursor_res = if widget.hovered_btn.is_some() {
+                LoadCursorW(None, IDC_HAND)
+            } else {
+                LoadCursorW(None, IDC_ARROW)
+            };
+            if let Ok(c) = cursor_res {
+                SetCursor(c);
+                return LRESULT(1);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_MOUSEMOVE => {
+            let mut tme = TRACKMOUSEEVENT {
+                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            let _ = TrackMouseEvent(&mut tme);
+
             let x = (lparam.0 & 0xffff) as i16 as f32;
             let y = ((lparam.0 >> 16) & 0xffff) as i16 as f32;
 
-            let in_btn = |(bx, by, bw, bh): (f32, f32, f32, f32)| -> bool {
-                x >= bx && x <= bx + bw && y >= by && y <= by + bh
+            let in_btn = |(cx, cy, r): (f32, f32, f32)| -> bool {
+                let dx = x - cx;
+                let dy = y - cy;
+                (dx * dx + dy * dy) <= (r * r)
             };
 
             let new_hover = if in_btn(BTN_LIKE) {
@@ -224,6 +266,24 @@ unsafe extern "system" fn widget_wnd_proc(
 
             if widget.hovered_btn != new_hover {
                 widget.hovered_btn = new_hover;
+                let cur = if new_hover.is_some() {
+                    LoadCursorW(None, IDC_HAND)
+                } else {
+                    LoadCursorW(None, IDC_ARROW)
+                };
+                if let Ok(c) = cur {
+                    SetCursor(c);
+                }
+                widget.render_and_flush();
+            }
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            if widget.hovered_btn.is_some() {
+                widget.hovered_btn = None;
+                if let Ok(c) = LoadCursorW(None, IDC_ARROW) {
+                    SetCursor(c);
+                }
                 widget.render_and_flush();
             }
             LRESULT(0)
@@ -232,8 +292,10 @@ unsafe extern "system" fn widget_wnd_proc(
             let x = (lparam.0 & 0xffff) as i16 as f32;
             let y = ((lparam.0 >> 16) & 0xffff) as i16 as f32;
 
-            let in_btn = |(bx, by, bw, bh): (f32, f32, f32, f32)| -> bool {
-                x >= bx && x <= bx + bw && y >= by && y <= by + bh
+            let in_btn = |(cx, cy, r): (f32, f32, f32)| -> bool {
+                let dx = x - cx;
+                let dy = y - cy;
+                (dx * dx + dy * dy) <= (r * r)
             };
 
             if in_btn(BTN_LIKE) {
@@ -247,7 +309,7 @@ unsafe extern "system" fn widget_wnd_proc(
             } else if in_btn(BTN_CLOSE) {
                 let _ = ShowWindow(hwnd, SW_HIDE);
             } else {
-                // Drag the window via OS HTCAPTION
+                // Drag window via OS hardware-accelerated HTCAPTION
                 ReleaseCapture().unwrap_or_default();
                 SendMessageW(hwnd, WM_NCLBUTTONDOWN, WPARAM(HTCAPTION as usize), LPARAM(0));
             }
@@ -330,22 +392,22 @@ impl WidgetWindow {
         };
         pixmap.fill(Color::TRANSPARENT);
 
-        // 1. Draw soft outer blur shadow (stacked rounded rects)
+        // 1. Soft layered glow shadow
         self.draw_shadow(&mut pixmap);
 
-        // 2. Draw capsule pill background
+        // 2. Glassmorphism pill background with crisp 1px highlight border
         self.draw_pill_bg(&mut pixmap);
 
-        // 3. Draw album cover disc (vinyl spinning effect)
+        // 3. High-res spinning vinyl disc / album artwork
         self.draw_cover_disc(&mut pixmap, now_opt.as_ref());
 
-        // 4. Draw track title, artist, audio wave animation
+        // 4. Track title, artist, audio wave animation
         self.draw_meta_and_waves(&mut pixmap, now_opt.as_ref());
 
-        // 5. Draw progress bar and timestamp
+        // 5. Progress bar and timestamp
         self.draw_progress(&mut pixmap, now_opt.as_ref());
 
-        // 6. Draw action buttons
+        // 6. Action buttons with vector icons
         self.draw_buttons(&mut pixmap, now_opt.as_ref());
 
         // 7. Flush 32-bit premultiplied ARGB to layered window
@@ -353,8 +415,13 @@ impl WidgetWindow {
     }
 
     fn draw_shadow(&self, pixmap: &mut Pixmap) {
-        let shadow_offsets = [(0.0, 3.0, 0.08), (0.0, 6.0, 0.12), (0.0, 10.0, 0.18)];
-        for (ox, oy, alpha) in shadow_offsets {
+        let shadow_steps = [
+            (0.0, 1.5, 0.05),
+            (0.0, 3.5, 0.09),
+            (0.0, 6.0, 0.15),
+            (0.0, 9.0, 0.22),
+        ];
+        for (ox, oy, alpha) in shadow_steps {
             let mut paint = Paint::default();
             paint.set_color_rgba8(0, 0, 0, (alpha * 255.0) as u8);
             paint.anti_alias = true;
@@ -373,13 +440,12 @@ impl WidgetWindow {
     fn draw_pill_bg(&self, pixmap: &mut Pixmap) {
         let path = build_rounded_rect(PILL_X, PILL_Y, PILL_W, PILL_H, PILL_RADIUS);
 
-        // Linear gradient: #1a1f2a (26, 31, 42) -> #0b0e14 (11, 14, 20)
         let shader = LinearGradient::new(
             Point::from_xy(0.0, PILL_Y),
             Point::from_xy(0.0, PILL_Y + PILL_H),
             vec![
-                GradientStop::new(0.0, Color::from_rgba8(26, 31, 42, 250)),
-                GradientStop::new(1.0, Color::from_rgba8(11, 14, 20, 250)),
+                GradientStop::new(0.0, Color::from_rgba8(26, 31, 42, 252)),
+                GradientStop::new(1.0, Color::from_rgba8(11, 14, 20, 252)),
             ],
             tiny_skia::SpreadMode::Pad,
             Transform::identity(),
@@ -392,9 +458,9 @@ impl WidgetWindow {
             pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
         }
 
-        // Inner 1px subtle border: rgba(255, 255, 255, 0.16)
+        // Inner 1px top highlight border
         let mut stroke_paint = Paint::default();
-        stroke_paint.set_color_rgba8(255, 255, 255, 40);
+        stroke_paint.set_color_rgba8(255, 255, 255, 38);
         stroke_paint.anti_alias = true;
         let mut stroke = tiny_skia::Stroke::default();
         stroke.width = 1.0;
@@ -402,72 +468,147 @@ impl WidgetWindow {
     }
 
     fn draw_cover_disc(&mut self, pixmap: &mut Pixmap, now: Option<&crate::monitor::PlaySnapshot>) {
-        let cx = PILL_X + 24.0;
+        let cx = PILL_X + 26.0;
         let cy = PILL_Y + PILL_H / 2.0;
-        let r = 18.0;
+        let r = 19.0;
 
         // Base vinyl disc dark circle
         let mut disc_builder = PathBuilder::new();
         disc_builder.push_circle(cx, cy, r);
-        if let Some(disc_path) = disc_builder.finish() {
-            let mut disc_paint = Paint::default();
-            disc_paint.set_color_rgba8(16, 20, 28, 255);
-            disc_paint.anti_alias = true;
-            pixmap.fill_path(&disc_path, &disc_paint, FillRule::Winding, Transform::identity(), None);
+        let disc_path = match disc_builder.finish() {
+            Some(p) => p,
+            None => return,
+        };
 
-            // Vinyl subtle rings
+        // Radial gradient vinyl texture fallback
+        let shader = RadialGradient::new(
+            Point::from_xy(cx, cy),
+            Point::from_xy(cx, cy),
+            r,
+            vec![
+                GradientStop::new(0.0, Color::from_rgba8(27, 33, 44, 255)),
+                GradientStop::new(0.30, Color::from_rgba8(27, 33, 44, 255)),
+                GradientStop::new(0.31, Color::from_rgba8(5, 7, 10, 255)),
+                GradientStop::new(0.34, Color::from_rgba8(38, 44, 54, 255)),
+                GradientStop::new(0.65, Color::from_rgba8(18, 22, 31, 255)),
+                GradientStop::new(1.0, Color::from_rgba8(5, 7, 10, 255)),
+            ],
+            SpreadMode::Pad,
+            Transform::identity(),
+        );
+
+        let mut disc_paint = Paint::default();
+        if let Some(s) = shader {
+            disc_paint.shader = s;
+        } else {
+            disc_paint.set_color_rgba8(15, 18, 25, 255);
+        }
+        disc_paint.anti_alias = true;
+        pixmap.fill_path(&disc_path, &disc_paint, FillRule::Winding, Transform::identity(), None);
+
+        // Check if cover URL has changed
+        let cover_url = now.map(|n| n.cover.as_str()).unwrap_or("");
+        if !cover_url.is_empty() && cover_url != self.last_cover_url {
+            self.last_cover_url = cover_url.to_string();
+            self.cover_pixmap = None;
+            let url = cover_url.to_string();
+            let tx = self.cover_tx.clone();
+
+            tokio::spawn(async move {
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(8))
+                    .build()
+                    .unwrap_or_default();
+                let req = client
+                    .get(&url)
+                    .header(
+                        "User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+                    )
+                    .header("Referer", "https://music.163.com/");
+
+                if let Ok(resp) = req.send().await {
+                    if let Ok(bytes) = resp.bytes().await {
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            // High quality resize to 38x38
+                            let resized = img.resize_exact(38, 38, image::imageops::FilterType::Lanczos3);
+                            let rgba = resized.to_rgba8();
+                            if let Some(mut px) = Pixmap::new(38, 38) {
+                                px.data_mut().copy_from_slice(&rgba.into_raw());
+                                let _ = tx.send((url, px));
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        let is_playing = now.map(|n| n.playing).unwrap_or(false);
+
+        // Draw album art or vinyl grooves
+        if let Some(ref cover) = self.cover_pixmap {
+            // Gentle spinning angle when playing (~14 seconds per revolution)
+            let angle = if is_playing {
+                (self.anim_frame as f32 * 1.2) % 360.0
+            } else {
+                0.0
+            };
+
+            let mut trans = Transform::identity();
+            trans = trans.pre_translate(cx, cy);
+            trans = trans.pre_rotate(angle);
+            trans = trans.pre_translate(-19.0, -19.0);
+
+            let mut cover_paint = Paint::default();
+            cover_paint.shader = Pattern::new(
+                cover.as_ref(),
+                SpreadMode::Pad,
+                FilterQuality::Bilinear,
+                1.0,
+                trans,
+            );
+            cover_paint.anti_alias = true;
+            pixmap.fill_path(&disc_path, &cover_paint, FillRule::Winding, Transform::identity(), None);
+        } else {
+            // Vinyl grooves fallback
             let mut ring_paint = Paint::default();
-            ring_paint.set_color_rgba8(255, 255, 255, 18);
+            ring_paint.set_color_rgba8(255, 255, 255, 20);
             ring_paint.anti_alias = true;
             let mut stroke = tiny_skia::Stroke::default();
-            stroke.width = 1.0;
+            stroke.width = 0.8;
 
-            for ring_r in [14.0, 10.0, 6.0] {
+            for ring_r in [14.0, 11.0, 8.0] {
                 let mut ring_builder = PathBuilder::new();
                 ring_builder.push_circle(cx, cy, ring_r);
                 if let Some(rp) = ring_builder.finish() {
                     pixmap.stroke_path(&rp, &ring_paint, &stroke, Transform::identity(), None);
                 }
             }
+        }
 
-            // Check if we have cover image URL to fetch or render
-            let cover_url = now.map(|n| n.cover.as_str()).unwrap_or("");
-            if !cover_url.is_empty() && cover_url != self.last_cover_url {
-                self.last_cover_url = cover_url.to_string();
-                self.cover_pixmap = None;
-                let url = cover_url.to_string();
-                let client = reqwest::Client::new();
-                // Download in background
-                tokio::spawn(async move {
-                    if let Ok(resp) = client.get(&url).send().await {
-                        if let Ok(bytes) = resp.bytes().await {
-                            if let Ok(img) = image::load_from_memory(&bytes) {
-                                let rgba = img.to_rgba8();
-                                let (w, h) = rgba.dimensions();
-                                if let Some(mut px) = Pixmap::new(w, h) {
-                                    px.data_mut().copy_from_slice(&rgba.into_raw());
-                                    // Cache would be stored
-                                }
-                            }
-                        }
-                    }
-                });
-            }
+        // Disc outer rim border
+        let mut rim_paint = Paint::default();
+        rim_paint.set_color_rgba8(255, 255, 255, 45);
+        rim_paint.anti_alias = true;
+        let mut rim_stroke = tiny_skia::Stroke::default();
+        rim_stroke.width = 1.0;
+        pixmap.stroke_path(&disc_path, &rim_paint, &rim_stroke, Transform::identity(), None);
 
-            // Center spindle spindle pin
-            let mut hole_builder = PathBuilder::new();
-            hole_builder.push_circle(cx, cy, 3.5);
-            if let Some(hp) = hole_builder.finish() {
-                let mut hole_paint = Paint::default();
-                hole_paint.set_color_rgba8(0, 0, 0, 255);
-                hole_paint.anti_alias = true;
-                pixmap.fill_path(&hp, &hole_paint, FillRule::Winding, Transform::identity(), None);
+        // Center spindle hole
+        let mut hole_builder = PathBuilder::new();
+        hole_builder.push_circle(cx, cy, 3.5);
+        if let Some(hp) = hole_builder.finish() {
+            let mut hole_paint = Paint::default();
+            hole_paint.set_color_rgba8(5, 7, 10, 255);
+            hole_paint.anti_alias = true;
+            pixmap.fill_path(&hp, &hole_paint, FillRule::Winding, Transform::identity(), None);
 
-                let mut pin_stroke = Paint::default();
-                pin_stroke.set_color_rgba8(255, 255, 255, 120);
-                pin_stroke.anti_alias = true;
-                pixmap.stroke_path(&hp, &pin_stroke, &stroke, Transform::identity(), None);
-            }
+            let mut pin_stroke = Paint::default();
+            pin_stroke.set_color_rgba8(255, 255, 255, 140);
+            pin_stroke.anti_alias = true;
+            let mut stroke = tiny_skia::Stroke::default();
+            stroke.width = 1.2;
+            pixmap.stroke_path(&hp, &pin_stroke, &stroke, Transform::identity(), None);
         }
     }
 
@@ -477,28 +618,34 @@ impl WidgetWindow {
             None => ("等待播放曲目...", "打开播放器播放即可", false),
         };
 
+        let text_start_x = PILL_X + 50.0;
+        let text_y = 25.0;
+
         // Title text
-        self.draw_text(pixmap, title, 50.0, 20.0, 11.5, Color::from_rgba8(255, 255, 255, 255), 115.0);
+        let title_w = self.draw_text(pixmap, title, text_start_x, text_y, 12.0, Color::from_rgba8(255, 255, 255, 255), 115.0);
 
         // Dot separator
-        self.draw_text(pixmap, "·", 170.0, 20.0, 10.0, Color::from_rgba8(100, 110, 125, 255), 10.0);
+        let dot_x = text_start_x + title_w + 4.0;
+        let dot_w = self.draw_text(pixmap, "·", dot_x, text_y, 10.0, Color::from_rgba8(88, 96, 105, 255), 10.0);
 
         // Artist text
-        self.draw_text(pixmap, artist, 180.0, 20.0, 10.5, Color::from_rgba8(140, 150, 165, 255), 45.0);
+        let artist_x = dot_x + dot_w + 4.0;
+        let artist_w = self.draw_text(pixmap, artist, artist_x, text_y, 11.0, Color::from_rgba8(139, 148, 158, 255), 52.0);
 
-        // Soundwaves: 4 neon-green vertical bars at x = 230
-        let wave_x = 230.0;
-        let wave_y_base = 21.0;
+        // Soundwaves: 4 neon-green vertical bars
+        let wave_x = (artist_x + artist_w + 5.0).min(PILL_X + 225.0);
+        let wave_y_base = text_y + 1.0;
+
         let heights = if playing {
-            let f = self.anim_frame;
+            let f = self.anim_frame as f32;
             [
-                3.0 + ((f as f32 * 0.2).sin().abs() * 7.0),
-                4.0 + (((f as f32 * 0.25) + 1.0).sin().abs() * 8.0),
-                3.0 + (((f as f32 * 0.18) + 2.0).sin().abs() * 7.0),
-                4.0 + (((f as f32 * 0.22) + 3.0).sin().abs() * 8.0),
+                3.0 + ((f * 0.16).sin().abs() * 7.5),
+                4.0 + ((f * 0.23 + 1.2).sin().abs() * 8.5),
+                3.0 + ((f * 0.19 + 2.4).sin().abs() * 7.0),
+                4.0 + ((f * 0.25 + 3.6).sin().abs() * 8.0),
             ]
         } else {
-            [3.0, 3.0, 3.0, 3.0]
+            [2.5, 2.5, 2.5, 2.5]
         };
 
         let mut wave_paint = Paint::default();
@@ -506,7 +653,7 @@ impl WidgetWindow {
         wave_paint.anti_alias = true;
 
         for (i, h) in heights.iter().enumerate() {
-            let bx = wave_x + (i as f32 * 4.0);
+            let bx = wave_x + (i as f32 * 3.5);
             let by = wave_y_base - h;
             if let Some(r) = Rect::from_xywh(bx, by, 2.0, *h) {
                 let path = build_rounded_rect(r.x(), r.y(), r.width(), r.height(), 1.0);
@@ -527,39 +674,56 @@ impl WidgetWindow {
             0.0
         };
 
-        // Progress bar track
-        let track_x = 50.0;
+        let track_x = PILL_X + 50.0;
         let track_y = 35.0;
-        let track_w = 115.0;
+        let track_w = 95.0;
         let track_h = 2.5;
 
+        // Progress background track
         let bg_path = build_rounded_rect(track_x, track_y, track_w, track_h, 1.25);
         let mut bg_paint = Paint::default();
-        bg_paint.set_color_rgba8(255, 255, 255, 30);
+        bg_paint.set_color_rgba8(255, 255, 255, 25);
         bg_paint.anti_alias = true;
         pixmap.fill_path(&bg_path, &bg_paint, FillRule::Winding, Transform::identity(), None);
 
         // Progress bar fill (orange/red gradient)
-        if ratio > 0.001 {
-            let fill_w = track_w * ratio;
+        if ratio > 0.005 {
+            let fill_w = (track_w * ratio).max(3.0);
             let fill_path = build_rounded_rect(track_x, track_y, fill_w, track_h, 1.25);
             let mut fill_paint = Paint::default();
             fill_paint.set_color_rgba8(232, 65, 66, 255);
             fill_paint.anti_alias = true;
             pixmap.fill_path(&fill_path, &fill_paint, FillRule::Winding, Transform::identity(), None);
+
+            // Glowing progress thumb head dot
+            let thumb_cx = track_x + fill_w;
+            let thumb_cy = track_y + track_h / 2.0;
+            let mut thumb_builder = PathBuilder::new();
+            thumb_builder.push_circle(thumb_cx, thumb_cy, 2.0);
+            if let Some(tp) = thumb_builder.finish() {
+                let mut thumb_paint = Paint::default();
+                thumb_paint.set_color_rgba8(255, 123, 114, 255);
+                thumb_paint.anti_alias = true;
+                pixmap.fill_path(&tp, &thumb_paint, FillRule::Winding, Transform::identity(), None);
+            }
         }
 
-        // Time labels: 00:08 / 04:47
+        // Time labels: 00:15 / 04:47
         let played_s = played_ms / 1000;
-        let dur_s = dur_ms / 1000;
-        let time_str = format!(
-            "{:02}:{:02} / {:02}:{:02}",
-            played_s / 60,
-            played_s % 60,
-            dur_s / 60,
-            dur_s % 60
-        );
-        self.draw_text(pixmap, &time_str, 172.0, 36.5, 9.5, Color::from_rgba8(125, 133, 144, 255), 75.0);
+        let time_str = if dur_ms > 0 {
+            let dur_s = dur_ms / 1000;
+            format!(
+                "{:02}:{:02} / {:02}:{:02}",
+                played_s / 60,
+                played_s % 60,
+                dur_s / 60,
+                dur_s % 60
+            )
+        } else {
+            format!("{:02}:{:02}", played_s / 60, played_s % 60)
+        };
+
+        self.draw_text(pixmap, &time_str, track_x + track_w + 8.0, 40.0, 9.5, Color::from_rgba8(125, 133, 144, 255), 75.0);
     }
 
     fn draw_buttons(&self, pixmap: &mut Pixmap, now: Option<&crate::monitor::PlaySnapshot>) {
@@ -583,106 +747,187 @@ impl WidgetWindow {
             (false, false)
         };
 
-        for ((bx, by, bw, _bh), idx, kind) in buttons {
+        for ((cx, cy, r), idx, kind) in buttons {
             let is_hovered = self.hovered_btn == Some(idx);
-            let r = bw / 2.0;
-            let cx = bx + r;
-            let cy = by + r;
 
             let mut circle_builder = PathBuilder::new();
             circle_builder.push_circle(cx, cy, r);
-            if let Some(cp) = circle_builder.finish() {
-                let mut bg_paint = Paint::default();
-                bg_paint.anti_alias = true;
+            let cp = match circle_builder.finish() {
+                Some(p) => p,
+                None => continue,
+            };
 
-                if idx == 0 && current_is_liked {
-                    bg_paint.set_color_rgba8(46, 160, 67, 180);
-                } else if idx == 1 && current_is_disliked {
-                    bg_paint.set_color_rgba8(232, 65, 66, 180);
-                } else if is_hovered {
-                    bg_paint.set_color_rgba8(255, 255, 255, 60);
-                } else {
-                    bg_paint.set_color_rgba8(255, 255, 255, 18);
-                }
+            let mut bg_paint = Paint::default();
+            bg_paint.anti_alias = true;
 
-                pixmap.fill_path(&cp, &bg_paint, FillRule::Winding, Transform::identity(), None);
-
-                let mut stroke_paint = Paint::default();
-                stroke_paint.anti_alias = true;
-                let mut stroke = tiny_skia::Stroke::default();
-                stroke.width = 1.0;
-
-                if idx == 0 && current_is_liked {
-                    stroke_paint.set_color_rgba8(86, 211, 100, 255);
-                } else if idx == 1 && current_is_disliked {
-                    stroke_paint.set_color_rgba8(255, 123, 114, 255);
-                } else if is_hovered {
-                    stroke_paint.set_color_rgba8(255, 255, 255, 90);
-                } else {
-                    stroke_paint.set_color_rgba8(255, 255, 255, 28);
-                }
-                pixmap.stroke_path(&cp, &stroke_paint, &stroke, Transform::identity(), None);
-
-                // Draw button iconography
-                self.draw_button_icon(pixmap, cx, cy, kind, is_hovered);
+            if idx == 0 && current_is_liked {
+                bg_paint.set_color_rgba8(46, 160, 67, 100);
+            } else if idx == 1 && current_is_disliked {
+                bg_paint.set_color_rgba8(232, 65, 66, 100);
+            } else if idx == 4 && is_hovered {
+                bg_paint.set_color_rgba8(232, 65, 66, 90);
+            } else if is_hovered {
+                bg_paint.set_color_rgba8(255, 255, 255, 55);
+            } else {
+                bg_paint.set_color_rgba8(255, 255, 255, 16);
             }
+
+            pixmap.fill_path(&cp, &bg_paint, FillRule::Winding, Transform::identity(), None);
+
+            let mut stroke_paint = Paint::default();
+            stroke_paint.anti_alias = true;
+            let mut stroke = tiny_skia::Stroke::default();
+            stroke.width = 1.0;
+
+            if idx == 0 && current_is_liked {
+                stroke_paint.set_color_rgba8(86, 211, 100, 255);
+            } else if idx == 1 && current_is_disliked {
+                stroke_paint.set_color_rgba8(255, 123, 114, 255);
+            } else if idx == 4 && is_hovered {
+                stroke_paint.set_color_rgba8(255, 123, 114, 255);
+            } else if is_hovered {
+                stroke_paint.set_color_rgba8(255, 255, 255, 90);
+            } else {
+                stroke_paint.set_color_rgba8(255, 255, 255, 26);
+            }
+            pixmap.stroke_path(&cp, &stroke_paint, &stroke, Transform::identity(), None);
+
+            // Highlight play button as primary action
+            if idx == 2 {
+                let mut play_ring = tiny_skia::Stroke::default();
+                play_ring.width = 1.2;
+                let mut play_stroke = Paint::default();
+                play_stroke.anti_alias = true;
+                if is_hovered {
+                    play_stroke.set_color_rgba8(255, 255, 255, 230);
+                } else {
+                    play_stroke.set_color_rgba8(255, 255, 255, 110);
+                }
+                pixmap.stroke_path(&cp, &play_stroke, &play_ring, Transform::identity(), None);
+            }
+
+            // Draw crisp vector icon geometry
+            self.draw_button_icon(pixmap, cx, cy, kind, is_hovered, current_is_liked, current_is_disliked);
         }
     }
 
-    fn draw_button_icon(&self, pixmap: &mut Pixmap, cx: f32, cy: f32, kind: &str, is_hover: bool) {
-        let mut icon_paint = Paint::default();
-        icon_paint.anti_alias = true;
+    fn draw_button_icon(
+        &self,
+        pixmap: &mut Pixmap,
+        cx: f32,
+        cy: f32,
+        kind: &str,
+        is_hover: bool,
+        is_liked: bool,
+        is_disliked: bool,
+    ) {
+        let mut stroke_paint = Paint::default();
+        stroke_paint.anti_alias = true;
+
+        let mut fill_paint = Paint::default();
+        fill_paint.anti_alias = true;
+
         if is_hover {
-            icon_paint.set_color_rgba8(255, 255, 255, 255);
+            stroke_paint.set_color_rgba8(255, 255, 255, 255);
+            fill_paint.set_color_rgba8(255, 255, 255, 255);
         } else {
-            icon_paint.set_color_rgba8(180, 190, 205, 220);
+            stroke_paint.set_color_rgba8(170, 180, 195, 230);
+            fill_paint.set_color_rgba8(170, 180, 195, 230);
         }
 
         match kind {
             "like" => {
-                // Thumbs up symbol
-                self.draw_text(pixmap, "👍", cx - 4.5, cy + 3.0, 9.0, Color::from_rgba8(255, 200, 50, 255), 15.0);
+                // Vector thumbs up
+                if is_liked {
+                    stroke_paint.set_color_rgba8(86, 211, 100, 255);
+                    fill_paint.set_color_rgba8(86, 211, 100, 255);
+                }
+
+                // Vertical wrist bar
+                let mut wrist = PathBuilder::new();
+                wrist.move_to(cx - 4.8, cy - 1.0);
+                wrist.line_to(cx - 4.8, cy + 4.5);
+                let mut wrist_stroke = tiny_skia::Stroke::default();
+                wrist_stroke.width = 1.4;
+                wrist_stroke.line_cap = tiny_skia::LineCap::Round;
+                if let Some(p) = wrist.finish() {
+                    pixmap.stroke_path(&p, &stroke_paint, &wrist_stroke, Transform::identity(), None);
+                }
+
+                // Hand body & thumb
+                let mut hand = PathBuilder::new();
+                hand.move_to(cx - 3.2, cy + 4.5);
+                hand.line_to(cx + 3.0, cy + 4.5);
+                hand.quad_to(cx + 4.5, cy + 4.5, cx + 4.5, cy + 2.5);
+                hand.line_to(cx + 4.5, cy - 0.2);
+                hand.line_to(cx - 0.5, cy - 0.2);
+                hand.line_to(cx - 0.5, cy - 4.2);
+                hand.quad_to(cx - 1.5, cy - 5.2, cx - 2.5, cy - 4.2);
+                hand.line_to(cx - 3.2, cy - 1.0);
+                hand.close();
+                if let Some(p) = hand.finish() {
+                    pixmap.fill_path(&p, &fill_paint, FillRule::Winding, Transform::identity(), None);
+                }
             }
             "dislike" => {
-                // Prohibited sign
-                self.draw_text(pixmap, "🚫", cx - 4.5, cy + 3.0, 9.0, Color::from_rgba8(240, 70, 70, 255), 15.0);
+                // Vector prohibited / ban sign
+                if is_disliked {
+                    stroke_paint.set_color_rgba8(255, 123, 114, 255);
+                }
+                let mut pb = PathBuilder::new();
+                pb.push_circle(cx, cy, 4.8);
+                pb.move_to(cx - 3.2, cy - 3.2);
+                pb.line_to(cx + 3.2, cy + 3.2);
+
+                let mut stroke = tiny_skia::Stroke::default();
+                stroke.width = 1.3;
+                stroke.line_cap = tiny_skia::LineCap::Round;
+                if let Some(p) = pb.finish() {
+                    pixmap.stroke_path(&p, &stroke_paint, &stroke, Transform::identity(), None);
+                }
             }
             "play" => {
-                // Play triangle
+                // Vector play triangle
                 let mut pb = PathBuilder::new();
-                pb.move_to(cx - 2.5, cy - 4.0);
-                pb.line_to(cx + 4.0, cy);
-                pb.line_to(cx - 2.5, cy + 4.0);
+                pb.move_to(cx - 2.5, cy - 4.2);
+                pb.line_to(cx + 4.2, cy);
+                pb.line_to(cx - 2.5, cy + 4.2);
                 pb.close();
                 if let Some(p) = pb.finish() {
-                    pixmap.fill_path(&p, &icon_paint, FillRule::Winding, Transform::identity(), None);
+                    pixmap.fill_path(&p, &fill_paint, FillRule::Winding, Transform::identity(), None);
                 }
             }
             "console" => {
-                // Expand arrows
+                // Vector corner expand arrows
                 let mut pb = PathBuilder::new();
                 let mut stroke = tiny_skia::Stroke::default();
-                stroke.width = 1.2;
+                stroke.width = 1.3;
+                stroke.line_cap = tiny_skia::LineCap::Round;
+                stroke.line_join = tiny_skia::LineJoin::Round;
+
                 pb.move_to(cx - 3.5, cy + 3.5);
                 pb.line_to(cx + 3.5, cy - 3.5);
-                pb.move_to(cx, cy - 3.5);
+                // Arrow head
+                pb.move_to(cx + 1.2, cy - 3.5);
                 pb.line_to(cx + 3.5, cy - 3.5);
-                pb.line_to(cx + 3.5, cy);
+                pb.line_to(cx + 3.5, cy - 1.2);
                 if let Some(p) = pb.finish() {
-                    pixmap.stroke_path(&p, &icon_paint, &stroke, Transform::identity(), None);
+                    pixmap.stroke_path(&p, &stroke_paint, &stroke, Transform::identity(), None);
                 }
             }
             "close" => {
-                // Cross X
+                // Vector clean cross
                 let mut pb = PathBuilder::new();
                 let mut stroke = tiny_skia::Stroke::default();
-                stroke.width = 1.2;
-                pb.move_to(cx - 3.0, cy - 3.0);
-                pb.line_to(cx + 3.0, cy + 3.0);
-                pb.move_to(cx + 3.0, cy - 3.0);
-                pb.line_to(cx - 3.0, cy + 3.0);
+                stroke.width = 1.3;
+                stroke.line_cap = tiny_skia::LineCap::Round;
+
+                pb.move_to(cx - 3.2, cy - 3.2);
+                pb.line_to(cx + 3.2, cy + 3.2);
+                pb.move_to(cx + 3.2, cy - 3.2);
+                pb.line_to(cx - 3.2, cy + 3.2);
                 if let Some(p) = pb.finish() {
-                    pixmap.stroke_path(&p, &icon_paint, &stroke, Transform::identity(), None);
+                    pixmap.stroke_path(&p, &stroke_paint, &stroke, Transform::identity(), None);
                 }
             }
             _ => {}
@@ -698,18 +943,17 @@ impl WidgetWindow {
         size: f32,
         color: Color,
         max_w: f32,
-    ) {
+    ) -> f32 {
         let font = match self.fonts.main_font.as_ref() {
             Some(f) => f,
-            None => return,
+            None => return 0.0,
         };
 
         let mut cur_x = x;
         let mut chars = text.chars().peekable();
 
         while let Some(c) = chars.next() {
-            if cur_x - x > max_w - 10.0 && chars.peek().is_some() {
-                // Append ellipsis
+            if cur_x - x > max_w - 8.0 && chars.peek().is_some() {
                 for dot in ['.', '.', '.'] {
                     let (metrics, bitmap) = font.rasterize(dot, size);
                     let gx = cur_x + metrics.xmin as f32;
@@ -726,6 +970,8 @@ impl WidgetWindow {
             self.blit_glyph(pixmap, &bitmap, metrics.width, metrics.height, gx, gy, color);
             cur_x += metrics.advance_width;
         }
+
+        cur_x - x
     }
 
     fn blit_glyph(
