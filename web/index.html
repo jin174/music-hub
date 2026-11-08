@@ -1050,6 +1050,8 @@
             if (row) row.style.opacity = '1';
             showToast(`已取消对《${title}》的偏好标记`);
           }
+        } else {
+          showToast('设置失败: ' + (res.error || '后端接口未响应，请重启应用'));
         }
       } catch (e) {
         showToast('设置失败: ' + e);
