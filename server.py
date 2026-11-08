@@ -77,6 +77,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path in ("/", "/index.html"):
                 return self._file("index.html", "text/html; charset=utf-8")
+            if url.path in ("/mini", "/mini.html"):
+                return self._file("mini.html", "text/html; charset=utf-8")
             if url.path == "/api/state":
                 return self._json(a.state())
             if url.path == "/api/recent":

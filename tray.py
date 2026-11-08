@@ -61,6 +61,9 @@ def run_tray(app, on_quit):
     def open_ui(icon=None, item=None):
         webbrowser.open(app.base_url)
 
+    def open_mini(icon=None, item=None):
+        webbrowser.open(app.base_url + "/mini")
+
     def set_mode(mode):
         def handler(icon, item):
             if mode == "scrobble" and not app.cfg.authorized:
@@ -79,6 +82,7 @@ def run_tray(app, on_quit):
 
     menu = Menu(
         Item("打开控制台", open_ui, default=True),
+        Item("打开迷你挂件", open_mini),
         Menu.SEPARATOR,
         Item("只记录（不打卡）", set_mode("record"),
              checked=lambda i: app.cfg.get("mode") == "record", radio=True),

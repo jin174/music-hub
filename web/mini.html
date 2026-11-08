@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Music Hub · 桌面迷你挂件</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #e84142;
+      --green: #2ea043;
+      --blue: #388bfd;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      user-select: none;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+    }
+    .mini-card {
+      width: 100%;
+      height: 100%;
+      background: rgba(22, 27, 34, 0.95);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .cover-wrap {
+      width: 50px;
+      height: 50px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #21262d;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .cover-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .cover-fallback {
+      font-size: 20px;
+      color: var(--muted);
+    }
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      background: #8b949e;
+      box-shadow: 0 0 6px rgba(0,0,0,0.5);
+    }
+    .live-dot.playing {
+      background: #56d364;
+      box-shadow: 0 0 8px #56d364;
+    }
+    .info-wrap {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .title-row {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+    }
+    .artist-row {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .progress-bar-wrap {
+      width: 100%;
+      height: 4px;
+      background: #21262d;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #ff7b72, var(--accent));
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    .time-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+    .actions-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .btn-row {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .mini-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 5px;
+      width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.15s;
+      padding: 0;
+    }
+    .mini-btn:hover {
+      background: #21262d;
+      color: var(--text);
+      border-color: var(--text);
+    }
+    .mini-btn.active-like {
+      background: rgba(46, 160, 67, 0.25);
+      border-color: var(--green);
+      color: #56d364;
+    }
+    .mini-btn.active-dislike {
+      background: rgba(232, 65, 66, 0.25);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .toast {
+      position: absolute;
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      border: 1px solid var(--border);
+      color: #fff;
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      white-space: nowrap;
+      z-index: 10;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="mini-card" id="card">
+    <div class="cover-wrap">
+      <img id="coverImg" class="cover-img" src="" style="display:none;">
+      <span id="coverFallback" class="cover-fallback">🎵</span>
+      <div id="liveDot" class="live-dot"></div>
+    </div>
+    <div class="info-wrap">
+      <div id="trackTitle" class="title-row">等待音乐软件开播...</div>
+      <div id="trackArtist" class="artist-row">支持网易云 / QQ / 汽水音乐等</div>
+      <div class="progress-bar-wrap">
+        <div id="progFill" class="progress-bar-fill"></div>
+      </div>
+      <div class="time-row">
+        <span id="timeCur">00:00</span>
+        <span id="timeTotal">00:00</span>
+      </div>
+    </div>
+    <div class="actions-wrap">
+      <div class="btn-row">
+        <button id="likeBtn" class="mini-btn" title="👍 喜欢" onclick="toggleMiniFeedback('like')">👍</button>
+        <button id="dislikeBtn" class="mini-btn" title="🚫 避雷" onclick="toggleMiniFeedback('dislike')">🚫</button>
+      </div>
+      <div class="btn-row">
+        <button id="playBtn" class="mini-btn" title="▶ 客户端重播" onclick="replayClient()">▶</button>
+        <button class="mini-btn" title="⤢ 打开主控制台" onclick="openMainConsole()">⤢</button>
+      </div>
+    </div>
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script>
+    let curState = null;
+    let localPlayedMs = 0;
+    let isPlaying = false;
+    let durMs = 0;
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[c]);
+    }
+
+    function fmtTime(ms) {
+      if (!ms || ms < 0) return '00:00';
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.className = 'toast show';
+      setTimeout(() => t.className = 'toast', 1600);
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch('/api/state');
+        const st = await res.json();
+        curState = st;
+        render(st);
+      } catch (e) {
+        // network or server sleep
+      }
+    }
+
+    function render(st) {
+      const now = st.now;
+      const dot = document.getElementById('liveDot');
+      const titleEl = document.getElementById('trackTitle');
+      const artistEl = document.getElementById('trackArtist');
+      const coverImg = document.getElementById('coverImg');
+      const coverFb = document.getElementById('coverFallback');
+      const progFill = document.getElementById('progFill');
+      const timeCur = document.getElementById('timeCur');
+      const timeTotal = document.getElementById('timeTotal');
+
+      if (!now) {
+        dot.className = 'live-dot';
+        titleEl.innerText = '等待播放曲目...';
+        artistEl.innerText = '打开任意播放器播放即可';
+        coverImg.style.display = 'none';
+        coverFb.style.display = 'block';
+        progFill.style.width = '0%';
+        timeCur.innerText = '00:00';
+        timeTotal.innerText = '00:00';
+        isPlaying = false;
+        return;
+      }
+
+      isPlaying = Boolean(now.playing);
+      dot.className = isPlaying ? 'live-dot playing' : 'live-dot';
+      titleEl.innerText = now.title || '未知曲目';
+      artistEl.innerText = now.artist || '未知歌手';
+
+      if (now.cover) {
+        coverImg.src = now.cover + '?param=100y100';
+        coverImg.style.display = 'block';
+        coverFb.style.display = 'none';
+      } else {
+        coverImg.style.display = 'none';
+        coverFb.style.display = 'block';
+      }
+
+      durMs = now.duration_ms || 0;
+      localPlayedMs = now.played_ms || 0;
+      updateProgress();
+    }
+
+    function updateProgress() {
+      const progFill = document.getElementById('progFill');
+      const timeCur = document.getElementById('timeCur');
+      const timeTotal = document.getElementById('timeTotal');
+      timeCur.innerText = fmtTime(localPlayedMs);
+      timeTotal.innerText = fmtTime(durMs);
+      if (durMs > 0) {
+        const pct = Math.min(100, Math.max(0, (localPlayedMs / durMs) * 100));
+        progFill.style.width = pct.toFixed(1) + '%';
+      } else {
+        progFill.style.width = isPlaying ? '50%' : '0%';
+      }
+    }
+
+    // 每一秒本地平滑前进一步
+    setInterval(() => {
+      if (isPlaying && durMs > 0 && localPlayedMs < durMs) {
+        localPlayedMs += 1000;
+        updateProgress();
+      }
+    }, 1000);
+
+    async function toggleMiniFeedback(action) {
+      const now = curState?.now;
+      if (!now || !now.title) return showToast('未在放歌');
+      const btn = action === 'like' ? document.getElementById('likeBtn') : document.getElementById('dislikeBtn');
+      const isCur = btn.classList.contains(action === 'like' ? 'active-like' : 'active-dislike');
+      const act = isCur ? 'remove' : action;
+      try {
+        const res = await (await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: now.title, artist: now.artist, action: act })
+        })).json();
+        if (res.ok) {
+          if (act === 'like') {
+            btn.className = 'mini-btn active-like';
+            document.getElementById('dislikeBtn').className = 'mini-btn';
+            showToast('已标记 👍 喜欢');
+          } else if (act === 'dislike') {
+            btn.className = 'mini-btn active-dislike';
+            document.getElementById('likeBtn').className = 'mini-btn';
+            showToast('已加入 🚫 避雷');
+          } else {
+            btn.className = 'mini-btn';
+            showToast('已取消偏好标记');
+          }
+        }
+      } catch (e) {
+        showToast('操作失败');
+      }
+    }
+
+    async function replayClient() {
+      const now = curState?.now;
+      if (!now || !now.ncm_id) return showToast('无网易云ID');
+      await fetch('/api/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: now.ncm_id })
+      });
+      showToast('已唤起客户端播放');
+    }
+
+    function openMainConsole() {
+      if (window.opener) {
+        window.opener.focus();
+      } else {
+        window.open('/', '_blank');
+      }
+    }
+
+    poll();
+    setInterval(poll, 1500);
+  </script>
+</body>
+</html>

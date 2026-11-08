@@ -393,6 +393,28 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .panel { display: none; }
     .panel.active { display: block; }
+    .modal-backdrop {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.78);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal-card {
+      background: #161b22;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px 22px;
+      max-width: 540px;
+      width: 100%;
+      max-height: 94vh;
+      overflow-y: auto;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.8);
+    }
   </style>
 </head>
 <body>
@@ -404,7 +426,8 @@
         <span class="badge-pill" id="topStatusPill">SMTC 实时监听中</span>
       </div>
       <div class="mode-switch">
-        <span style="color:var(--muted);">工作模式：</span>
+        <button class="mode-btn" onclick="openMiniWindow()" title="在桌面右下角弹出极简半透明音乐挂件，适合常驻摸鱼">🪟 迷你挂件</button>
+        <span style="color:var(--muted); margin-left:6px;">工作模式：</span>
         <button class="mode-btn" id="modeRecordBtn" onclick="setMode('record')" title="只记录进本地数据库，交给外部工具打卡">只记本地库</button>
         <button class="mode-btn" id="modeScrobbleBtn" onclick="setMode('scrobble')" title="由本程序直接打卡到 Last.fm（需退出旧打卡器防重复）">接管 Last.fm 打卡</button>
       </div>
@@ -503,7 +526,11 @@
       <div class="card" id="roamResultCard" style="display:none;">
         <div class="results-header">
           <h2 id="roamResultTitle">为你合成的专属漫游</h2>
-          <button class="btn btn-ghost btn-sm" onclick="copyList('roam')">📋 复制全部歌单文本</button>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="exportForNetEase()" style="background: rgba(232,65,66,0.18); border: 1px solid var(--accent); color: #ff7b7c;" title="复制符合网易云导入语法的标准文本，可一键粘贴进网易云新建歌单">📤 灌入网易云</button>
+            <button class="btn btn-ghost btn-sm" onclick="copyList('roam')">📋 复制文本</button>
+            <button class="btn btn-ghost btn-sm" onclick="downloadRoamTxt()">📥 下载 .txt</button>
+          </div>
         </div>
         <div class="track-list" id="roamList"></div>
       </div>
@@ -514,7 +541,8 @@
       <div class="card">
         <div class="results-header">
           <h2>📊 我的本地听歌统计</h2>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="generateWrappedCard()" style="background: linear-gradient(135deg, #e84142, #ff7b72); border:none; color:white; font-weight:600;" title="基于你的真实听歌数据，纯本地矢量绘制一张精美海报">📸 生成听歌名片</button>
             <button class="btn btn-ghost btn-sm" onclick="loadStats(7)">近 7 天</button>
             <button class="btn btn-ghost btn-sm" onclick="loadStats(30)">近 30 天</button>
             <button class="btn btn-ghost btn-sm" onclick="loadStats(3650)">全部历史</button>
@@ -651,12 +679,34 @@
     </div>
   </div>
 
+  <!-- 听歌名片 / 海报弹窗 -->
+  <div class="modal-backdrop" id="wrappedModal" style="display:none;" onclick="if(event.target===this)closeWrappedModal()">
+    <div class="modal-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="font-size:16px; font-weight:700;">📸 我的听歌专属名片</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeWrappedModal()">✕ 关闭</button>
+      </div>
+      <div style="display:flex; justify-content:center; align-items:center; margin-bottom:14px; background:#070a0e; border-radius:12px; padding:10px;">
+        <canvas id="wrappedCanvas" width="750" height="1000" style="max-width:100%; height:auto; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,0.6);"></canvas>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <span style="font-size:12px; color:var(--muted);">💡 纯本地 Canvas 即时矢量绘制 · 零上传 · 绝对私密</span>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost btn-sm" onclick="copyWrappedImage()">📋 复制图片</button>
+          <button class="btn btn-sm" onclick="downloadWrappedImage()">💾 保存高清海报</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
     let lastNow = null;
     let radarTracks = [];
     let roamTracks = [];
+    let lastStatsData = null;
+    let lastStatsDays = 7;
 
     // 所有来自歌名 / 歌手 / 接口的文本插入 innerHTML 前都必须转义，防止特殊字符破坏页面或注入脚本
     function esc(s) {
@@ -1141,6 +1191,8 @@
     // ---------- 统计与本地流水 ----------
     async function loadStats(days) {
       const d = await (await fetch('/api/stats?days=' + days)).json();
+      lastStatsData = d;
+      lastStatsDays = days;
       const t = d.totals || {};
       const mins = Math.round((t.ms || 0) / 60000);
       document.getElementById('statGrid').innerHTML = `
@@ -1453,6 +1505,337 @@
         }).join('');
       } catch (e) {
         listEl.innerHTML = `<div style="color:var(--accent); font-size:13px;">加载失败: ${esc(String(e))}</div>`;
+      }
+    }
+
+    // ---------- 🪟 迷你挂件与外部生态 ----------
+    function openMiniWindow() {
+      const w = 380, h = 125;
+      const left = Math.max(0, (window.screen?.availWidth || 1920) - w - 24);
+      const top = Math.max(0, (window.screen?.availHeight || 1080) - h - 40);
+      window.open(
+        '/mini',
+        'MusicHubMini',
+        `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=no`
+      );
+    }
+
+    function exportForNetEase() {
+      if (!roamTracks || !roamTracks.length) {
+        return showToast('请先点击【✨ 生成今日漫游歌单】');
+      }
+      const lines = roamTracks.map(t => `${t.title} - ${t.artist}`);
+      const text = lines.join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        alert(
+          '🎉 成功复制 ' + roamTracks.length + ' 首标准匹配文本到剪贴板！\n\n' +
+          '【一键灌入网易云歌单步骤】：\n' +
+          '1. 打开网易云音乐客户端；\n' +
+          '2. 点击左侧「创建歌单」并打开该歌单；\n' +
+          '3. 点击右上方的【导入外部歌单】-> 选择【文本导入】；\n' +
+          '4. 按 Ctrl+V 粘贴并确认，' + roamTracks.length + ' 首同频新歌瞬间全部入库！'
+        );
+      }).catch(() => {
+        showToast('剪贴板复制失败，请尝试点击【下载 .txt】');
+      });
+    }
+
+    function downloadRoamTxt() {
+      if (!roamTracks || !roamTracks.length) return showToast('暂无漫游歌单');
+      const lines = roamTracks.map(t => `${t.title} - ${t.artist}`).join('\n');
+      const blob = new Blob([lines], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `MusicHub_今日漫游_${new Date().toISOString().slice(0,10)}.txt`;
+      a.click();
+      showToast('已下载歌单文本文件！');
+    }
+
+    // ---------- 📸 听歌专属名片 (Canvas) ----------
+    async function generateWrappedCard() {
+      let d = lastStatsData;
+      if (!d) {
+        showToast('正在提取最新听歌画像数据...');
+        try {
+          d = await (await fetch('/api/stats?days=30')).json();
+          lastStatsData = d;
+          lastStatsDays = 30;
+        } catch (e) {
+          return showToast('提取数据失败: ' + e);
+        }
+      }
+      renderWrappedCanvas(d, lastStatsDays || 30);
+      document.getElementById('wrappedModal').style.display = 'flex';
+    }
+
+    function closeWrappedModal() {
+      document.getElementById('wrappedModal').style.display = 'none';
+    }
+
+    function renderWrappedCanvas(d, days) {
+      const canvas = document.getElementById('wrappedCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = 750, H = 1000;
+      ctx.clearRect(0, 0, W, H);
+
+      // 1. 深色微光背景
+      const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+      bgGrad.addColorStop(0, '#090d13');
+      bgGrad.addColorStop(0.5, '#121720');
+      bgGrad.addColorStop(1, '#161b24');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // 2. 霓虹光晕渲染 (Ambient Glow)
+      const redGlow = ctx.createRadialGradient(620, 160, 20, 620, 160, 320);
+      redGlow.addColorStop(0, 'rgba(232, 65, 66, 0.28)');
+      redGlow.addColorStop(0.6, 'rgba(232, 65, 66, 0.08)');
+      redGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = redGlow;
+      ctx.fillRect(0, 0, W, H);
+
+      const blueGlow = ctx.createRadialGradient(120, 840, 20, 120, 840, 340);
+      blueGlow.addColorStop(0, 'rgba(56, 139, 253, 0.22)');
+      blueGlow.addColorStop(0.7, 'rgba(56, 139, 253, 0.05)');
+      blueGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = blueGlow;
+      ctx.fillRect(0, 0, W, H);
+
+      // 3. 边框高光线条
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.lineWidth = 2;
+      roundRect(ctx, 24, 24, W - 48, H - 48, 28);
+      ctx.stroke();
+
+      function roundRect(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.arcTo(x + w, y, x + w, y + h, r);
+        c.arcTo(x + w, y + h, x, y + h, r);
+        c.arcTo(x, y + h, x, y, r);
+        c.arcTo(x, y, x + w, y, r);
+        c.closePath();
+      }
+
+      // 4. 顶部品牌与日期
+      ctx.fillStyle = '#e84142';
+      ctx.font = 'bold 18px -apple-system, sans-serif';
+      ctx.fillText('🎵 MUSIC HUB · 听歌画像报告', 54, 78);
+
+      const periodStr = days >= 365 ? '全部历史' : `近 ${days} 天`;
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '14px -apple-system, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${periodStr} · ${dateStr}`, W - 54, 78);
+      ctx.textAlign = 'left';
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath();
+      ctx.moveTo(54, 98);
+      ctx.lineTo(W - 54, 98);
+      ctx.stroke();
+
+      // 5. 音乐称号
+      const hrs = d.hours || {};
+      let peakH = 15, peakCnt = 0;
+      for (let h = 0; h < 24; h++) {
+        if ((hrs[h] || 0) > peakCnt) { peakCnt = hrs[h]; peakH = h; }
+      }
+      let persona = '🎧 随性乐迷';
+      let quote = '旋律流淌在日常的每一道缝隙里';
+      if (peakH >= 0 && peakH < 6) {
+        persona = '🌙 深夜造梦家';
+        quote = '当世界进入沉睡，你的灵魂在旋律中肆意漫游';
+      } else if (peakH >= 6 && peakH < 12) {
+        persona = '🌅 晨光独奏者';
+        quote = '清晨的第一缕微光，伴随跃动的音符一同苏醒';
+      } else if (peakH >= 12 && peakH < 18) {
+        persona = '☀️ 午后心流体';
+        quote = '沉浸在专注的节奏中，把灵感酿成现实';
+      } else {
+        persona = '🌆 暮光旅人';
+        quote = '卸下白昼的喧嚣，在晚风里与好歌同频共振';
+      }
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 36px -apple-system, sans-serif';
+      ctx.fillText(persona, 54, 160);
+
+      ctx.fillStyle = '#8b949e';
+      ctx.font = 'italic 16px -apple-system, sans-serif';
+      ctx.fillText(`“${quote}”`, 54, 194);
+
+      // 6. 核心四大指标 (2x2 Grid)
+      const t = d.totals || {};
+      const mins = Math.round((t.ms || 0) / 60000);
+      const hours = (mins / 60).toFixed(1);
+      const durText = mins >= 60 ? `${hours} 小时` : `${mins} 分钟`;
+      const compRate = t.n > 0 ? Math.round(((t.c || 0) / t.n) * 100) : 0;
+      const rec = d.recs || {};
+
+      const boxes = [
+        { label: '累计播放曲目', val: `${t.n || 0} 首`, sub: 'SMTC 全程无感监听' },
+        { label: '专注听歌时长', val: durText, sub: `沉浸式陪伴 ${mins} 分钟` },
+        { label: '完整听完率', val: `${compRate}%`, sub: `完播 ≥85% 达成 ${t.c || 0} 次` },
+        { label: '生物钟活跃峰值', val: `${String(peakH).padStart(2,'0')}:00`, sub: `单小时累计播放 ${peakCnt} 首` }
+      ];
+
+      const boxW = 305, boxH = 96, gapX = 32, gapY = 16, startX = 54, startY = 226;
+      boxes.forEach((b, i) => {
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        const bx = startX + col * (boxW + gapX);
+        const by = startY + row * (boxH + gapY);
+
+        ctx.fillStyle = 'rgba(22, 27, 34, 0.7)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        roundRect(ctx, bx, by, boxW, boxH, 14);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText(b.label, bx + 16, by + 28);
+
+        ctx.fillStyle = '#e6edf3';
+        ctx.font = 'bold 26px -apple-system, sans-serif';
+        ctx.fillText(b.val, bx + 16, by + 64);
+
+        ctx.fillStyle = '#6e7681';
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.fillText(b.sub, bx + 16, by + 84);
+      });
+
+      // 7. 灵魂常听音乐人 TOP 3
+      const artY = 470;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 18px -apple-system, sans-serif';
+      ctx.fillText('🎤 灵魂常听音乐人 TOP 3', 54, artY);
+
+      const arts = (d.top_artists || []).slice(0, 3);
+      const medals = ['🥇', '🥈', '🥉'];
+      if (!arts.length) {
+        ctx.fillStyle = '#6e7681';
+        ctx.font = '14px -apple-system, sans-serif';
+        ctx.fillText('暂无足够播放记录', 54, artY + 40);
+      } else {
+        arts.forEach((a, i) => {
+          const ay = artY + 22 + i * 58;
+          ctx.fillStyle = 'rgba(22, 27, 34, 0.6)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+          roundRect(ctx, 54, ay, W - 108, 48, 10);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.font = '18px -apple-system, sans-serif';
+          ctx.fillText(medals[i], 70, ay + 31);
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 15px -apple-system, sans-serif';
+          ctx.fillText(a.artist, 108, ay + 30);
+
+          ctx.fillStyle = '#8b949e';
+          ctx.font = '13px -apple-system, sans-serif';
+          ctx.textAlign = 'right';
+          ctx.fillText(`收听 ${a.n} 首 · ${Math.round((a.ms || 0)/60000)} 分钟`, W - 74, ay + 30);
+          ctx.textAlign = 'left';
+        });
+      }
+
+      // 8. 年度/本期真爱单曲
+      const lovedY = 690;
+      ctx.fillStyle = '#56d364';
+      ctx.font = 'bold 18px -apple-system, sans-serif';
+      ctx.fillText('💚 本期真爱单曲（完播率最高）', 54, lovedY);
+
+      const loved = (d.loved || [])[0];
+      const lovedBoxY = lovedY + 20;
+      ctx.fillStyle = 'rgba(46, 160, 67, 0.1)';
+      ctx.strokeStyle = 'rgba(46, 160, 67, 0.3)';
+      roundRect(ctx, 54, lovedBoxY, W - 108, 64, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      if (loved) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 17px -apple-system, sans-serif';
+        ctx.fillText(loved.title, 74, lovedBoxY + 28);
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText(`${loved.artist} · 完整听完 ${loved.c} 次`, 74, lovedBoxY + 50);
+        ctx.fillStyle = '#56d364';
+        ctx.font = 'bold 14px -apple-system, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('100% 真爱完播', W - 74, lovedBoxY + 38);
+        ctx.textAlign = 'left';
+      } else {
+        ctx.fillStyle = '#6e7681';
+        ctx.font = '14px -apple-system, sans-serif';
+        ctx.fillText('暂无真爱单曲记录', 74, lovedBoxY + 38);
+      }
+
+      // 9. 推荐闭环击中指标
+      const recY = 810;
+      ctx.fillStyle = '#388bfd';
+      ctx.font = 'bold 17px -apple-system, sans-serif';
+      ctx.fillText('🎯 智能推荐闭环满意度', 54, recY);
+
+      const recBoxY = recY + 18;
+      ctx.fillStyle = 'rgba(56, 139, 253, 0.08)';
+      ctx.strokeStyle = 'rgba(56, 139, 253, 0.25)';
+      roundRect(ctx, 54, recBoxY, W - 108, 56, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      const recText = (rec.total || 0) > 0
+        ? `系统共推荐 ${rec.total} 首 · 试听转化 ${rec.conversion_rate}% · 完播满意度 ${rec.hit_rate}%`
+        : '正在积累推荐命中池 · 探索更多单曲雷达与全盘漫游即可解锁';
+      ctx.fillStyle = '#e6edf3';
+      ctx.font = '14px -apple-system, sans-serif';
+      ctx.fillText(recText, 74, recBoxY + 34);
+
+      // 10. 底部水印
+      const footY = 930;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath();
+      ctx.moveTo(54, footY);
+      ctx.lineTo(W - 54, footY);
+      ctx.stroke();
+
+      ctx.fillStyle = '#6e7681';
+      ctx.font = '12px -apple-system, sans-serif';
+      ctx.fillText('私人音乐中枢 · Music Hub 出品', 54, footY + 28);
+      ctx.textAlign = 'right';
+      ctx.fillText('本地私密存储 · 零云端依赖', W - 54, footY + 28);
+      ctx.textAlign = 'left';
+    }
+
+    function downloadWrappedImage() {
+      const canvas = document.getElementById('wrappedCanvas');
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `MusicHub_听歌名片_${new Date().toISOString().slice(0,10)}.png`;
+      a.click();
+      showToast('海报图片已下载到本地！');
+    }
+
+    async function copyWrappedImage() {
+      const canvas = document.getElementById('wrappedCanvas');
+      try {
+        canvas.toBlob(blob => {
+          if (!blob) return showToast('生成图片失败');
+          navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]).then(() => {
+            showToast('🎉 海报图片已成功复制到剪贴板！可以直接粘贴发微信/QQ啦');
+          }).catch(err => {
+            showToast('复制图片失败，请点击【保存高清海报】下载');
+          });
+        });
+      } catch (e) {
+        showToast('浏览器不支持直接复制图片，请点击保存海报');
       }
     }
   </script>
