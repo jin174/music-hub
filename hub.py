@@ -25,6 +25,11 @@ def setup_logging(console):
     logging.basicConfig(level=logging.INFO, handlers=handlers,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+    def handle_exc(exc_type, exc_value, exc_traceback):
+        logging.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = handle_exc
+
 
 def main():
     console = "--console" in sys.argv
