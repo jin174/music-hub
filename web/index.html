@@ -349,6 +349,38 @@
       transition: all 0.25s;
       z-index: 999;
     }
+    .btn-icon {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 6px;
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.15s;
+      padding: 0;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .btn-icon:hover {
+      background: var(--card-hover);
+      color: var(--text);
+      border-color: var(--text);
+    }
+    .btn-icon.active-like {
+      background: rgba(46, 160, 67, 0.25);
+      border-color: var(--green);
+      color: #56d364;
+    }
+    .btn-icon.active-dislike {
+      background: rgba(232, 65, 66, 0.25);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
     .spinner {
       width: 14px;
       height: 14px;
@@ -489,6 +521,7 @@
           </div>
         </div>
         <div class="stat-grid" id="statGrid"></div>
+        <div id="recStatsBox" style="margin-bottom:18px;"></div>
         <div class="two-col" style="margin-bottom:18px;">
           <div class="stat-box">
             <h3 style="font-size:14px; margin-bottom:12px; color:var(--text);">🎤 常听歌手 Top 10</h3>
@@ -518,6 +551,8 @@
         <div class="results-header">
           <h2>🕒 最近播放流水账（含播放时长与切歌判定）</h2>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <a class="btn btn-ghost btn-sm" href="/api/export/csv" download title="导出带 UTF-8 BOM 的完整听歌流水，Excel 双击直接打开不乱码">📥 导出流水 CSV</a>
+            <a class="btn btn-ghost btn-sm" href="/api/export/backup" download title="一键下载 SQLite 数据库文件">💾 备份数据库</a>
             <button class="btn btn-ghost btn-sm" onclick="scrobblePlay(null)">📤 一键补打卡所有达标记录</button>
             <button class="btn btn-ghost btn-sm" onclick="loadRecent()">刷新记录</button>
           </div>
@@ -584,6 +619,25 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
           <button class="btn btn-sm" onclick="saveApps()">保存监听列表</button>
           <span style="font-size:12px; color:var(--muted);">提示：QQ 音乐同时支持 SMTC 与主窗口标题双通道自动识别</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:17px; margin-bottom:6px;">4. 数据资产备份与偏好黑名单</h2>
+        <p style="font-size:13px; color:var(--muted); margin-bottom:14px; line-height:1.6;">
+          本地听歌数据完全存储在你的电脑中。可随时导出为通用 CSV 表格在 Excel 盘点，也可备份数据库以防重装系统；点击下方还可查看并随时移除你的 👍 喜欢 与 🚫 避雷黑名单。
+        </p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+          <a class="btn btn-sm" href="/api/export/csv" download>📥 导出全部听歌流水 (CSV / Excel)</a>
+          <a class="btn btn-ghost btn-sm" href="/api/export/backup" download>💾 备份完整数据库 (hub.db)</a>
+          <button class="btn btn-ghost btn-sm" onclick="toggleFeedbackList()">🏷 查看偏好与避雷清单</button>
+        </div>
+        <div id="feedbackBox" style="display:none; margin-top:14px; border-top:1px solid var(--border); padding-top:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="font-size:14px;">我的偏好与黑名单清单</h3>
+            <button class="btn btn-ghost btn-sm" onclick="loadFeedbackList()">刷新清单</button>
+          </div>
+          <div id="feedbackList" class="track-list" style="max-height:280px; overflow-y:auto;"></div>
         </div>
       </div>
 
@@ -904,6 +958,9 @@
     function renderTrackRow(it, idx) {
       const row = document.createElement('div');
       row.className = 'track-item';
+      if (it.feedback === 'dislike') {
+        row.style.opacity = '0.35';
+      }
       const srcBadges = (it.sources || []).map(s =>
         s === 'lastfm' ? '<span class="tag tag-blue">Last.fm</span>' : '<span class="tag tag-green">网易云相似</span>'
       ).join(' ');
@@ -919,6 +976,12 @@
         ? `<img class="mini-cover" src="${esc(it.ncm.cover)}?param=80y80" loading="lazy">`
         : '';
       const biliUrl = `https://search.bilibili.com/all?keyword=${encodeURIComponent(it.artist + ' ' + it.title)}`;
+      const isLike = it.feedback === 'like';
+      const isDislike = it.feedback === 'dislike';
+      const likeClass = isLike ? 'btn-icon active-like' : 'btn-icon';
+      const dislikeClass = isDislike ? 'btn-icon active-dislike' : 'btn-icon';
+      const likeTitle = isLike ? '已标记喜欢（点击取消）' : '👍 喜欢（加权漫游推荐）';
+      const dislikeTitle = isDislike ? '已加入避雷黑名单（点击取消）' : '🚫 不想听（加入避雷黑名单）';
 
       row.innerHTML = `
         <div class="track-left">
@@ -932,12 +995,65 @@
         <div class="track-right">
           ${heardBadge}
           ${srcBadges}
+          <button class="${likeClass}" title="${likeTitle}"
+            data-artist="${esc(it.artist)}" data-title="${esc(it.title)}" data-action="${isLike ? 'remove' : 'like'}"
+            onclick="setFeedback(this.dataset.title, this.dataset.artist, this.dataset.action, this)">👍</button>
+          <button class="${dislikeClass}" title="${dislikeTitle}"
+            data-artist="${esc(it.artist)}" data-title="${esc(it.title)}" data-action="${isDislike ? 'remove' : 'dislike'}"
+            onclick="setFeedback(this.dataset.title, this.dataset.artist, this.dataset.action, this)">🚫</button>
           <button class="btn btn-sm" data-artist="${esc(it.artist)}" data-title="${esc(it.title)}" data-id="${ncmId}"
             onclick="playSong(this.dataset.artist, this.dataset.title, this.dataset.id, this)">▶ 客户端播</button>
           <a class="btn btn-ghost btn-sm" href="${esc(biliUrl)}" target="_blank">B站</a>
         </div>
       `;
       return row;
+    }
+
+    async function setFeedback(title, artist, action, btn) {
+      try {
+        const res = await (await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, artist, action })
+        })).json();
+        if (res.ok) {
+          const row = btn.closest('.track-item');
+          if (action === 'like') {
+            btn.className = 'btn-icon active-like';
+            btn.dataset.action = 'remove';
+            btn.title = '已标记喜欢（点击取消）';
+            const sib = btn.nextElementSibling;
+            if (sib && sib.classList.contains('active-dislike')) {
+              sib.className = 'btn-icon';
+              sib.dataset.action = 'dislike';
+              sib.title = '🚫 不想听（加入避雷黑名单）';
+            }
+            if (row) row.style.opacity = '1';
+            showToast(`已将《${title}》标记为 👍 喜欢`);
+          } else if (action === 'dislike') {
+            btn.className = 'btn-icon active-dislike';
+            btn.dataset.action = 'remove';
+            btn.title = '已加入避雷黑名单（点击取消）';
+            const sib = btn.previousElementSibling;
+            if (sib && sib.classList.contains('active-like')) {
+              sib.className = 'btn-icon';
+              sib.dataset.action = 'like';
+              sib.title = '👍 喜欢（加权漫游推荐）';
+            }
+            if (row) row.style.opacity = '0.35';
+            showToast(`已将《${title}》加入 🚫 避雷黑名单`);
+          } else {
+            const isThumb = btn.innerHTML.includes('👍');
+            btn.className = 'btn-icon';
+            btn.dataset.action = isThumb ? 'like' : 'dislike';
+            btn.title = isThumb ? '👍 喜欢（加权漫游推荐）' : '🚫 不想听（加入避雷黑名单）';
+            if (row) row.style.opacity = '1';
+            showToast(`已取消对《${title}》的偏好标记`);
+          }
+        }
+      } catch (e) {
+        showToast('设置失败: ' + e);
+      }
     }
 
     async function playSong(artist, title, knownId, btn) {
@@ -1031,6 +1147,44 @@
         <div class="stat-box"><div class="stat-num" style="color:#56d364;">${t.c || 0}</div><div class="stat-label">完整听完次数 (≥85%)</div></div>
         <div class="stat-box"><div class="stat-num" style="color:#ff7b7c;">${t.s || 0}</div><div class="stat-label">切歌跳过次数 (<30%)</div></div>
       `;
+
+      const rec = d.recs || {};
+      const recBox = document.getElementById('recStatsBox');
+      if (recBox) {
+        if ((rec.total || 0) > 0) {
+          recBox.innerHTML = `
+            <div class="stat-box" style="background: linear-gradient(135deg, rgba(22,27,34,0.95), rgba(31,38,48,0.95)); border-left: 3px solid var(--blue);">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                <div>
+                  <h3 style="font-size:14px; color:var(--text); margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                    🎯 推荐闭环验证看板
+                    <span class="tag tag-blue" style="font-size:11px;">近 ${rec.days || days} 天</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--muted); margin:0;">
+                    系统自动追踪单曲雷达与全盘漫游推给你的曲目，核对你在播放器切到时的真实收听完成度
+                  </p>
+                </div>
+                <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+                  <div>
+                    <div style="font-size:20px; font-weight:bold; color:var(--blue);">${rec.conversion_rate || 0}%</div>
+                    <div style="font-size:11px; color:var(--muted);">试听转化 (${rec.heard || 0}/${rec.total || 0} 首)</div>
+                  </div>
+                  <div>
+                    <div style="font-size:20px; font-weight:bold; color:#56d364;">${rec.hit_rate || 0}%</div>
+                    <div style="font-size:11px; color:var(--muted);">完播满意度 (听完 ${rec.completed || 0} · 切歌 ${rec.skipped || 0})</div>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+        } else {
+          recBox.innerHTML = `
+            <div class="stat-box" style="background: rgba(22,27,34,0.6); border: 1px dashed var(--border);">
+              <div style="font-size:13px; color:var(--muted);">
+                🎯 <b>推荐闭环验证</b>：暂无近期推荐记录。在「单曲雷达」或「专属漫游」探索新歌后，系统将自动开始追踪你的试听与完播命中率。
+              </div>
+            </div>`;
+        }
+      }
 
       const arts = d.top_artists || [];
       const maxArt = Math.max(1, ...arts.map(a => a.n || 0));
@@ -1252,6 +1406,52 @@
       if (!arr.length) return;
       const txt = arr.map((t, i) => `${i + 1}. ${t.artist} - ${t.title}`).join('\n');
       navigator.clipboard.writeText(txt).then(() => showToast(`已复制 ${arr.length} 首曲目到剪贴板！`));
+    }
+
+    async function toggleFeedbackList() {
+      const box = document.getElementById('feedbackBox');
+      if (box.style.display === 'none') {
+        box.style.display = 'block';
+        await loadFeedbackList();
+      } else {
+        box.style.display = 'none';
+      }
+    }
+
+    async function loadFeedbackList() {
+      const listEl = document.getElementById('feedbackList');
+      listEl.innerHTML = '<div style="color:var(--muted); font-size:13px;">加载中...</div>';
+      try {
+        const res = await (await fetch('/api/feedback?limit=100')).json();
+        const items = res.list || [];
+        if (items.length === 0) {
+          listEl.innerHTML = '<div style="color:var(--muted); font-size:13px;">暂无表态记录。在雷达中点击 👍 或 🚫 即可添加。</div>';
+          return;
+        }
+        listEl.innerHTML = items.map(it => {
+          const isLike = it.action === 'like';
+          const badge = isLike
+            ? '<span class="tag tag-green">👍 喜欢</span>'
+            : '<span class="tag tag-red">🚫 避雷</span>';
+          return `
+            <div class="track-item" style="padding:8px 12px;">
+              <div class="track-left">
+                <div class="track-info">
+                  <div class="track-name">${esc(it.title)}</div>
+                  <div class="track-artist">${esc(it.artist)}</div>
+                </div>
+              </div>
+              <div class="track-right">
+                ${badge}
+                <button class="btn btn-ghost btn-sm" style="color:var(--accent);"
+                  data-title="${esc(it.title)}" data-artist="${esc(it.artist)}"
+                  onclick="setFeedback(this.dataset.title, this.dataset.artist, 'remove', this); setTimeout(loadFeedbackList, 300);">移除</button>
+              </div>
+            </div>`;
+        }).join('');
+      } catch (e) {
+        listEl.innerHTML = `<div style="color:var(--accent); font-size:13px;">加载失败: ${esc(String(e))}</div>`;
+      }
     }
   </script>
 </body>

@@ -36,6 +36,36 @@ CREATE INDEX IF NOT EXISTS idx_plays_started ON plays(started_at);
 CREATE INDEX IF NOT EXISTS idx_plays_keys ON plays(title_key, artist_key);
 CREATE INDEX IF NOT EXISTS idx_plays_state ON plays(scrobble_state);
 CREATE TABLE IF NOT EXISTS cache(k TEXT PRIMARY KEY, v TEXT, exp INTEGER);
+
+-- 推荐闭环追踪表：记录系统推荐过哪些歌，并持续追踪用户后续在播放器是否真的去听了、是听完还是切歌
+CREATE TABLE IF NOT EXISTS recs(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    title_key TEXT NOT NULL,
+    artist_key TEXT NOT NULL,
+    source TEXT,                 -- 'radar' / 'roam'
+    seed_title TEXT,
+    seed_artist TEXT,
+    status TEXT DEFAULT 'pending', -- pending: 待听 | completed: 听完命中 | skipped: 切歌未命中 | partial: 听了部分
+    hit_play_id INTEGER,
+    hit_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_recs_keys ON recs(title_key, artist_key);
+CREATE INDEX IF NOT EXISTS idx_recs_created ON recs(created_at);
+
+-- 用户主动偏好表：👍 喜欢（加权）与 🚫 避雷（黑名单过滤）
+CREATE TABLE IF NOT EXISTS feedback(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    title_key TEXT NOT NULL,
+    artist_key TEXT NOT NULL,
+    action TEXT NOT NULL         -- 'like' | 'dislike'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_keys ON feedback(title_key, artist_key);
 """
 
 _NON_WORD = re.compile(r"[^0-9a-z\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
@@ -184,3 +214,102 @@ class DB:
             "INSERT OR REPLACE INTO cache(k,v,exp) VALUES(?,?,?)",
             (k, json.dumps(v, ensure_ascii=False), int(time.time() + ttl)),
         )
+
+    # ---------- 推荐闭环追踪与表态 ----------
+    def log_recommendations(self, rec_list, source="radar", seed_title="", seed_artist=""):
+        """记录推荐给用户的曲目，用于后续追踪用户在播放器是否真的去听了"""
+        now = int(time.time())
+        cutoff = now - 7 * 86400  # 7 天内同歌不重复插入待听池
+        with self._lock:
+            for item in rec_list:
+                t = (item.get("title") or "").strip()
+                a = (item.get("artist") or "").strip()
+                if not t or not a:
+                    continue
+                tk, ak = norm(t), norm(a.split("/")[0])
+                if not tk:
+                    continue
+                exists = self.conn.execute(
+                    "SELECT id FROM recs WHERE title_key=? AND artist_key=? AND created_at>?",
+                    (tk, ak, cutoff),
+                ).fetchone()
+                if not exists:
+                    self.conn.execute(
+                        "INSERT INTO recs(created_at, title, artist, title_key, artist_key, source, seed_title, seed_artist) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (now, t, a, tk, ak, source, seed_title or "", seed_artist or ""),
+                    )
+            self.conn.commit()
+
+    def check_recommendation_hit(self, title, artist, play_id, completed, skipped):
+        """当某首歌在播放器播放完毕，检查是否命中过近期推荐"""
+        tk = norm(title)
+        ak = norm((artist or "").split("/")[0])
+        if not tk:
+            return
+        now = int(time.time())
+        cutoff = now - 30 * 86400  # 30 天以内的推荐
+        st = "completed" if completed else ("skipped" if skipped else "partial")
+        with self._lock:
+            self.conn.execute(
+                "UPDATE recs SET status=?, hit_play_id=?, hit_at=? "
+                "WHERE title_key=? AND artist_key=? AND status='pending' AND created_at>?",
+                (st, play_id, now, tk, ak, cutoff),
+            )
+            self.conn.commit()
+
+    def recs_stats(self, days=30):
+        """统计推荐命中率"""
+        cutoff = int(time.time()) - days * 86400 if days > 0 else 0
+        rows = self.q(
+            "SELECT COUNT(*) total, "
+            "SUM(CASE WHEN status != 'pending' THEN 1 ELSE 0 END) heard, "
+            "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) completed, "
+            "SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) skipped "
+            "FROM recs WHERE created_at>=?",
+            (cutoff,),
+        )
+        r = rows[0] if rows else {}
+        total = int(r.get("total") or 0)
+        heard = int(r.get("heard") or 0)
+        completed = int(r.get("completed") or 0)
+        skipped = int(r.get("skipped") or 0)
+        conversion_rate = round((heard / total) * 100, 1) if total > 0 else 0.0
+        hit_rate = round((completed / heard) * 100, 1) if heard > 0 else 0.0
+        return {
+            "days": days,
+            "total": total,
+            "heard": heard,
+            "completed": completed,
+            "skipped": skipped,
+            "conversion_rate": conversion_rate,  # 转化试听率
+            "hit_rate": hit_rate,                # 完播满意度
+        }
+
+    def set_feedback(self, title, artist, action):
+        """用户对推荐表态：'like'（喜欢加权） / 'dislike'（避雷黑名单） / 'remove'（清除）"""
+        t = (title or "").strip()
+        a = (artist or "").strip()
+        tk = norm(t)
+        ak = norm(a.split("/")[0])
+        if not tk:
+            return False
+        with self._lock:
+            if action in ("remove", "none", "", None):
+                self.conn.execute("DELETE FROM feedback WHERE title_key=? AND artist_key=?", (tk, ak))
+            else:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO feedback(created_at, title, artist, title_key, artist_key, action) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (int(time.time()), t, a, tk, ak, action),
+                )
+            self.conn.commit()
+        return True
+
+    def get_feedback_map(self):
+        """返回所有用户的表态：{(tk, ak): 'like' | 'dislike'}"""
+        rows = self.q("SELECT title_key, artist_key, action FROM feedback")
+        return {(r["title_key"], r["artist_key"]): r["action"] for r in rows}
+
+    def get_feedback_list(self, limit=100):
+        return self.q("SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?", (limit,))

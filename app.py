@@ -109,6 +109,7 @@ class App:
                 {"id": s["id"], "title": s["title"], "artist": s["artist"], "cover": s["cover"]})
 
         heard = self.db.heard_index()
+        fb_map = self.db.get_feedback_map()
         for key, it in items.items():
             h = heard.get(key)
             it["base_score"] = it["score"]
@@ -119,8 +120,17 @@ class App:
                     it["score"] *= 0.3  # 累计跳过 ≥2 次且大于听完次数，才判定为不感兴趣并降权
             else:
                 it["heard"] = None
+            fb = fb_map.get(key)
+            it["feedback"] = fb
+            if fb == "like":
+                it["score"] *= 1.4
 
-        tracks = sorted(items.values(), key=lambda x: x["score"], reverse=True)[:60]
+        tracks = [
+            it for it in sorted(items.values(), key=lambda x: x["score"], reverse=True)
+            if it.get("feedback") != "dislike"
+        ][:60]
+        if tracks:
+            self.pool.submit(self.db.log_recommendations, tracks[:20], "radar", track, artist)
         artists = []
         if not tracks and artist:
             artists = self.lf.similar_artists(artist.split("/")[0], 20)
@@ -167,6 +177,11 @@ class App:
         if now:
             add_seed(now["title"], now["artist"], now.get("ncm_id"))
 
+        # 4) 用户主动点过 👍 喜欢的曲目
+        liked_tracks = self.db.q("SELECT title, artist FROM feedback WHERE action='like' ORDER BY created_at DESC LIMIT 8")
+        for r in liked_tracks:
+            add_seed(r["title"], r["artist"])
+
         if shuffle and len(seeds) > 8:
             seeds = random.sample(seeds, 8)
         else:
@@ -175,6 +190,7 @@ class App:
             return {"seeds": [], "tracks": [], "user": user}
 
         heard = self.db.heard_index()
+        fb_map = self.db.get_feedback_map()
         if user:
             for t in self.lf.user_recent_tracks(user, 100):
                 hk = (norm(t["title"]), norm(t["artist"].split("/")[0]))
@@ -211,6 +227,12 @@ class App:
         for key, it in items.items():
             if key in seen_seed:
                 continue
+            fb = fb_map.get(key)
+            if fb == "dislike":
+                continue  # 避雷黑名单，彻底过滤
+            it["feedback"] = fb
+            if fb == "like":
+                it["score"] *= 1.4
             h = heard.get(key)
             it["heard"] = {"plays": h["n"], "completed": h["c"] or 0, "skipped": h["s"] or 0} if h else None
             if h and hide_heard:
@@ -222,7 +244,10 @@ class App:
             out.append(it)
 
         out.sort(key=lambda x: x["score"], reverse=True)
-        return {"seeds": seeds, "tracks": out[:50], "user": user}
+        final_tracks = out[:50]
+        if final_tracks:
+            self.pool.submit(self.db.log_recommendations, final_tracks[:20], "roam", "全盘漫游", user or "本地")
+        return {"seeds": seeds, "tracks": final_tracks, "user": user}
 
     @staticmethod
     def _merge_roam_item(items, title, art, score, source, reason, ncm):
@@ -339,6 +364,7 @@ class App:
             "COUNT(*) n FROM plays WHERE started_at>=? GROUP BY h", (since,))
         scrobble = self.db.q(
             "SELECT scrobble_state st, COUNT(*) n FROM plays GROUP BY scrobble_state")
+        recs = self.db.recs_stats(days)
         return {
             "days": days,
             "totals": tot,
@@ -347,4 +373,49 @@ class App:
             "skipped": skipped,
             "hours": {r["h"]: r["n"] for r in hours},
             "scrobble": {r["st"]: r["n"] for r in scrobble},
+            "recs": recs,
         }
+
+    # ---------- 用户偏好表态 ----------
+    def feedback(self, title, artist, action):
+        return {"ok": self.db.set_feedback(title, artist, action)}
+
+    def feedback_list(self, limit=100):
+        return {"ok": True, "list": self.db.get_feedback_list(limit)}
+
+    # ---------- 数据导出 ----------
+    def export_csv(self):
+        import csv
+        import io
+        output = io.StringIO()
+        output.write("\ufeff")  # UTF-8 BOM 确保 Windows Excel 直接双击打开不乱码
+        writer = csv.writer(output)
+        writer.writerow([
+            "ID", "播放开始时间", "播放结束时间", "歌名", "主歌手", "完整歌手",
+            "专辑", "歌曲总时长(秒)", "实际播放(秒)", "完播率(%)",
+            "完整播放", "切歌跳过", "打卡状态", "播放软件", "网易云ID"
+        ])
+        rows = self.db.q("SELECT * FROM plays ORDER BY started_at DESC, id DESC")
+        state_map = {
+            "none": "未达标",
+            "eligible": "达标(未打卡)",
+            "pending": "排队打卡中",
+            "done": "已打卡",
+            "ignored": "Last.fm忽略",
+            "expired": "已过期",
+        }
+        for r in rows:
+            st = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["started_at"])) if r.get("started_at") else ""
+            et = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ended_at"])) if r.get("ended_at") else ""
+            dur_s = round((r.get("duration_ms") or 0) / 1000)
+            played_s = round((r.get("played_ms") or 0) / 1000)
+            ratio = round((played_s / dur_s) * 100, 1) if dur_s > 0 else 0.0
+            comp = "是" if r.get("completed") else "否"
+            skip = "是" if r.get("skipped") else "否"
+            scrobble_desc = state_map.get(r.get("scrobble_state"), r.get("scrobble_state") or "")
+            writer.writerow([
+                r["id"], st, et, r.get("title", ""), r.get("artist", ""), r.get("artists", ""),
+                r.get("album", ""), dur_s, played_s, f"{ratio}%",
+                comp, skip, scrobble_desc, r.get("app", ""), r.get("ncm_id") or ""
+            ])
+        return output.getvalue().encode("utf-8-sig")

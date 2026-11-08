@@ -251,6 +251,10 @@ class Monitor:
         skipped = 1 if dur and reason == "changed" and played < dur * 0.3 else 0
         self.db.update_play(p.play_id, ended_at=int(time.time()), played_ms=played,
                             completed=completed, skipped=skipped)
+        try:
+            self.db.check_recommendation_hit(p.title, p.artist, p.play_id, completed, skipped)
+        except Exception as e:
+            log.warning("check_recommendation_hit failed: %s", e)
         log.info("end(%s): %s - %s  %ds/%ds%s%s", reason, p.artist, p.title, played // 1000,
                  dur // 1000, " completed" if completed else "", " skipped" if skipped else "")
 

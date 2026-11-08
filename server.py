@@ -97,6 +97,34 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(a.ncm.match(qs.get("track", ""), qs.get("artist", "")) or {})
             if url.path == "/api/ncm/song":
                 return self._json(a.ncm.detail(int(qs["id"])) or {})
+            if url.path == "/api/recs/stats":
+                return self._json(a.db.recs_stats(int(qs.get("days", 30))))
+            if url.path == "/api/feedback":
+                return self._json(a.feedback_list(int(qs.get("limit", 100))))
+            if url.path == "/api/export/csv":
+                csv_bytes = a.export_csv()
+                fname = f"musichub_history_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8-sig")
+                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header("Content-Length", str(len(csv_bytes)))
+                self.end_headers()
+                self.wfile.write(csv_bytes)
+                return
+            if url.path == "/api/export/backup":
+                from db import DB_PATH
+                with a.db._lock:
+                    a.db.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                with open(DB_PATH, "rb") as f:
+                    db_bytes = f.read()
+                fname = f"musichub_backup_{time.strftime('%Y%m%d_%H%M%S')}.db"
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-sqlite3")
+                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header("Content-Length", str(len(db_bytes)))
+                self.end_headers()
+                self.wfile.write(db_bytes)
+                return
             if url.path == "/api/auth/start":
                 if not a.cfg.has_credentials:
                     return self._redirect("/#settings")
@@ -151,6 +179,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(a.delete_play(body["id"]))
             if url.path == "/api/play/clear_skip":
                 return self._json(a.clear_skip(body.get("title", ""), body.get("artist", "")))
+            if url.path == "/api/feedback":
+                return self._json(a.feedback(body.get("title", ""), body.get("artist", ""), body.get("action", "")))
             if url.path == "/api/play/scrobble":
                 return self._json(a.manual_scrobble(body.get("id")))
             if url.path == "/api/import_lastfm":
