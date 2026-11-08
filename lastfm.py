@@ -155,20 +155,6 @@ class Lastfm:
                     for a in d.get("similarartists", {}).get("artist", []) or []]
         return self._cached(f"lf:simartist:{artist}:{limit}", DAY, fetch)
 
-    def user_top_artists(self, user, period="1month", limit=15):
-        if not user:
-            return []
-        def fetch():
-            try:
-                d = self.call("user.getTopArtists", {"user": user, "period": period, "limit": limit})
-            except LastfmError:
-                return []
-            return [{
-                "artist": a.get("name", ""),
-                "playcount": int(a.get("playcount") or 0),
-            } for a in d.get("topartists", {}).get("artist", []) or []]
-        return self._cached(f"lf:utopart:{user}:{period}:{limit}", 1800, fetch)
-
     def user_top_tracks(self, user, period="1month", limit=20):
         if not user:
             return []

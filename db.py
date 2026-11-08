@@ -185,15 +185,6 @@ class DB:
             "SELECT * FROM plays WHERE scrobble_state='pending' ORDER BY started_at LIMIT ?", (limit,)
         )
 
-    def history_for(self, title, artist):
-        """某首歌在本地库里的播放 / 跳过次数（用于给推荐加权）"""
-        rows = self.q(
-            "SELECT COUNT(*) n, SUM(completed) c, SUM(skipped) s FROM plays WHERE title_key=? AND artist_key=?",
-            (norm(title), norm(artist)),
-        )
-        r = rows[0]
-        return {"plays": r["n"] or 0, "completed": r["c"] or 0, "skipped": r["s"] or 0}
-
     def heard_index(self):
         """所有听过的 (title_key, artist_key) → 统计，供推荐批量过滤"""
         rows = self.q(
