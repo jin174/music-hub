@@ -43,6 +43,7 @@ pub struct CurrentPlay {
     pub artists: Vec<String>,
     pub album: String,
     pub cover: String,
+    pub cover_bytes: Option<Arc<Vec<u8>>>,
     pub ncm_id: Option<i64>,
     pub duration_ms: i64,
     pub played_ms: f64,
@@ -72,6 +73,8 @@ pub struct PlaySnapshot {
     pub artists: Vec<String>,
     pub album: String,
     pub cover: String,
+    #[serde(skip)]
+    pub cover_bytes: Option<Arc<Vec<u8>>>,
     pub ncm_id: Option<i64>,
     pub duration_ms: i64,
     pub played_ms: i64,
@@ -129,6 +132,7 @@ impl Monitor {
             artists: p.artists.clone(),
             album: p.album.clone(),
             cover: p.cover.clone(),
+            cover_bytes: p.cover_bytes.clone(),
             ncm_id: p.ncm_id,
             duration_ms: p.duration_ms,
             played_ms: p.played_ms as i64,
@@ -171,15 +175,15 @@ impl Monitor {
                     .build()
                     .unwrap();
 
-                while !self.stop_flag.load(Ordering::SeqCst) {
-                    let tick_start = Instant::now();
-                    rt.block_on(self.tick(&mgr));
-                    let elapsed = tick_start.elapsed();
-                    let sleep_time = Duration::from_secs_f64(TICK_S).saturating_sub(elapsed);
-                    std::thread::sleep(sleep_time);
-                }
-
                 rt.block_on(async {
+                    while !self.stop_flag.load(Ordering::SeqCst) {
+                        let tick_start = Instant::now();
+                        self.tick(&mgr).await;
+                        let elapsed = tick_start.elapsed();
+                        let sleep_time = Duration::from_secs_f64(TICK_S).saturating_sub(elapsed);
+                        tokio::time::sleep(sleep_time).await;
+                    }
+
                     let mut guard = self.current.write().unwrap();
                     if guard.is_some() {
                         self.finalize(&mut guard, "shutdown").await;
@@ -259,7 +263,26 @@ impl Monitor {
         fallback_session
     }
 
+    fn extract_smtc_thumbnail(
+        props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties,
+    ) -> Option<Arc<Vec<u8>>> {
+        use windows::Storage::Streams::DataReader;
+        let thumb_ref = props.Thumbnail().ok()?;
+        let stream = thumb_ref.OpenReadAsync().ok()?.get().ok()?;
+        let size = stream.Size().ok()? as u32;
+        if size == 0 || size > 8 * 1024 * 1024 {
+            return None;
+        }
+        let input = stream.GetInputStreamAt(0).ok()?;
+        let reader = DataReader::CreateDataReader(&input).ok()?;
+        reader.LoadAsync(size).ok()?.get().ok()?;
+        let mut buf = vec![0u8; size as usize];
+        reader.ReadBytes(&mut buf).ok()?;
+        Some(Arc::new(buf))
+    }
+
     async fn tick(&self, mgr: &GlobalSystemMediaTransportControlsSessionManager) {
+        let mut smtc_session_props = None;
         let (title, artist, app, playing) = if let Some(s) = self.find_session(mgr) {
             let props = match s.TryGetMediaPropertiesAsync().ok().and_then(|op| op.get().ok()) {
                 Some(p) => p,
@@ -273,6 +296,7 @@ impl Monitor {
                 .ok()
                 .and_then(|i| i.PlaybackStatus().ok())
                 == Some(GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
+            smtc_session_props = Some((s, props));
             (t, a, app_id, is_playing)
         } else if let Some(fb) = self.find_window_fallback() {
             fb
@@ -302,12 +326,42 @@ impl Monitor {
             if guard.is_some() {
                 self.finalize(&mut guard, "changed").await;
             }
-            let new_play = self.start_play(&title, &artist, &app, now, playing, None).await;
+            let mut new_play = self.start_play(&title, &artist, &app, now, playing, None).await;
+            if let Some((ref s, ref props)) = smtc_session_props {
+                new_play.cover_bytes = Self::extract_smtc_thumbnail(props);
+                if new_play.duration_ms <= 0 {
+                    if let Some(dur) = s.GetTimelineProperties().ok().and_then(|tl| {
+                        let end = tl.EndTime().ok()?.Duration;
+                        let start = tl.StartTime().ok()?.Duration;
+                        let d = (end - start) / 10_000;
+                        if d > 0 { Some(d) } else { None }
+                    }) {
+                        new_play.duration_ms = dur;
+                    }
+                }
+            }
             *guard = Some(new_play);
             return;
         }
 
         if let Some(ref mut cur) = *guard {
+            if cur.cover_bytes.is_none() {
+                if let Some((_, ref props)) = smtc_session_props {
+                    cur.cover_bytes = Self::extract_smtc_thumbnail(props);
+                }
+            }
+            if cur.duration_ms <= 0 {
+                if let Some((ref s, _)) = smtc_session_props {
+                    if let Some(dur) = s.GetTimelineProperties().ok().and_then(|tl| {
+                        let end = tl.EndTime().ok()?.Duration;
+                        let start = tl.StartTime().ok()?.Duration;
+                        let d = (end - start) / 10_000;
+                        if d > 0 { Some(d) } else { None }
+                    }) {
+                        cur.duration_ms = dur;
+                    }
+                }
+            }
             if playing {
                 cur.played_ms += (now - cur.last_tick).min(MAX_DELTA_S) * 1000.0;
             }
@@ -380,6 +434,7 @@ impl Monitor {
             artists: artists_vec,
             album: String::new(),
             cover: String::new(),
+            cover_bytes: None,
             ncm_id: None,
             duration_ms: 0,
             played_ms: 0.0,
@@ -398,6 +453,7 @@ impl Monitor {
                 p.artists = prev.artists.clone();
                 p.album = prev.album.clone();
                 p.cover = prev.cover.clone();
+                p.cover_bytes = prev.cover_bytes.clone();
                 p.duration_ms = prev.duration_ms;
                 p.lookup = "done".to_string();
                 self.db.update_play_fields(
@@ -441,7 +497,9 @@ impl Monitor {
                         cur.artists = song.artists.clone();
                         cur.album = song.album.clone();
                         cur.cover = song.cover.clone();
-                        cur.duration_ms = song.duration_ms;
+                        if song.duration_ms > 0 {
+                            cur.duration_ms = song.duration_ms;
+                        }
                         cur.lookup = "done".to_string();
                     } else {
                         cur.lookup = "failed".to_string();
