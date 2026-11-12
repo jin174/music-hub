@@ -10,9 +10,10 @@ use crate::tray::{is_autostart_enabled, set_autostart};
 use base64::Engine;
 use chrono::{Local, TimeZone};
 use gpui::{
-    div, img, prelude::*, px, relative, rgb, rgba, size, App, Application, Bounds, ClipboardItem,
-    Context, Entity, FocusHandle, Image, ImageFormat, MouseButton, ObjectFit, RenderImage,
-    SharedString, Subscription, Window, WindowBounds, WindowOptions,
+    actions, div, img, prelude::*, px, relative, rgb, rgba, size, App, Application, Bounds,
+    ClipboardItem, Context, CursorStyle, Entity, FocusHandle, Image, ImageFormat, KeyBinding,
+    MouseButton, ObjectFit, RenderImage, SharedString, Subscription, Window, WindowBounds,
+    WindowOptions,
 };
 use input::{bind_input_keys, InputEvent, TextInput};
 use smallvec::SmallVec;
@@ -20,6 +21,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+actions!(music_hub_console, [DismissOverlay]);
 
 const APP_PRESETS: &[(&str, &str)] = &[
     ("cloudmusic.exe", "网易云音乐 (cloudmusic)"),
@@ -218,6 +221,8 @@ pub struct ConsoleView {
 
     // Recent plays state
     recent_rows: Vec<PlayRow>,
+    /// Row awaiting a second click on "✕" before its history record is deleted.
+    pending_delete: Option<i64>,
 
     // Settings state
     username_input: Entity<TextInput>,
@@ -363,6 +368,7 @@ impl ConsoleView {
             stats_data,
             wrapped_poster: None,
             recent_rows,
+            pending_delete: None,
             username_input,
             api_key_input,
             api_secret_input,
@@ -419,6 +425,18 @@ impl ConsoleView {
             }
         });
         self.show_toast("✅ 已保存 Key 与 Secret，请点击「前往 Last.fm 网页授权」", cx);
+    }
+
+    /// Esc dismisses the poster overlay (the modal also closes on a backdrop click).
+    fn dismiss_overlay(
+        &mut self,
+        _: &DismissOverlay,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.wrapped_poster.take().is_some() {
+            cx.notify();
+        }
     }
 
     pub fn switch_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
@@ -678,6 +696,8 @@ impl Render for ConsoleView {
             .text_color(rgb(0xe6edf3))
             .text_size(px(13.))
             .track_focus(&self.focus_handle)
+            .key_context("ConsoleView")
+            .on_action(cx.listener(Self::dismiss_overlay))
             .relative()
             // Top main area: Left Sidebar + Right Active View
             .child(
@@ -1192,7 +1212,11 @@ impl ConsoleView {
                             .px_3()
                             .py_1p5()
                             .rounded_md()
-                            .cursor_pointer()
+                            .cursor(if has_song {
+                                CursorStyle::PointingHand
+                            } else {
+                                CursorStyle::Arrow
+                            })
                             .bg(if has_song {
                                 rgb(0xe84142)
                             } else {
@@ -1218,6 +1242,13 @@ impl ConsoleView {
                             .px_3()
                             .py_1p5()
                             .rounded_md()
+                            // No track playing: keep the default arrow so the button does
+                            // not advertise an action that silently does nothing.
+                            .cursor(if has_song {
+                                CursorStyle::PointingHand
+                            } else {
+                                CursorStyle::Arrow
+                            })
                             .bg(if is_liked {
                                 rgba(0xe8414226)
                             } else {
@@ -1405,6 +1436,41 @@ impl ConsoleView {
                             )),
                     ),
             )
+            // Empty state: nothing has been searched yet, so explain what will happen
+            // instead of leaving an unbroken dark panel below the search card.
+            .children((self.radar_result.is_none() && !self.radar_loading).then(|| {
+                div()
+                    .id("radar-empty-state")
+                    .w_full()
+                    .p_6()
+                    .rounded_lg()
+                    .bg(rgb(0x121720))
+                    .border_1()
+                    .border_color(rgb(0x21262d))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_size(px(24.))
+                            .child("🎯"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xe6edf3))
+                            .child("输入一首歌，看看它的相似雷达"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(rgb(0x8b949e))
+                            .child("会同时查询 Last.fm 协同过滤与网易云相似推荐，并按本地听完/跳过历史自动排序"),
+                    )
+                    .into_any_element()
+            }))
             // Results Area
             .children(self.radar_result.as_ref().map(|res| {
                 let tracks = &res.tracks;
@@ -1854,6 +1920,9 @@ impl ConsoleView {
                             .flex_row()
                             .items_center()
                             .justify_between()
+                            // Controls drop below the title instead of colliding with it
+                            // when the window is squeezed to its 900x600 minimum.
+                            .flex_wrap()
                             .gap_3()
                             .child(
                                 div()
@@ -1878,6 +1947,7 @@ impl ConsoleView {
                                 div()
                                     .flex()
                                     .flex_row()
+                                    .flex_wrap()
                                     .items_center()
                                     .gap_2p5()
                                     .child(
@@ -1983,6 +2053,40 @@ impl ConsoleView {
                             }))
                     })),
             )
+            // Empty state: no roaming list yet. Previously this left an unstyled void.
+            .children((self.roam_result.is_none() && !self.roam_loading).then(|| {
+                div()
+                    .id("roam-empty-state")
+                    .w_full()
+                    .p_6()
+                    .rounded_lg()
+                    .bg(rgb(0x121720))
+                    .border_1()
+                    .border_color(rgb(0x21262d))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_size(px(24.))
+                            .child("🌌"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xe6edf3))
+                            .child("还没有漫游清单"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(rgb(0x8b949e))
+                            .child("点上方「✨ 生成今日漫游歌单」：会从你的真爱曲目与 Last.fm 常听榜取种子，合成 50 首没听过的歌"),
+                    )
+                    .into_any_element()
+            }))
             // Roam Results Table
             .children(self.roam_result.as_ref().map(|res| {
                 div()
@@ -2001,6 +2105,8 @@ impl ConsoleView {
                             .flex_row()
                             .items_center()
                             .justify_between()
+                            .flex_wrap()
+                            .gap_2()
                             .pb_2()
                             .border_b_1()
                             .border_color(rgb(0x262c36))
@@ -2018,6 +2124,7 @@ impl ConsoleView {
                                 div()
                                     .flex()
                                     .flex_row()
+                                    .flex_wrap()
                                     .items_center()
                                     .gap_2()
                                     .child(
@@ -2633,7 +2740,11 @@ impl ConsoleView {
                                         div()
                                             .id(("top-artist", i))
                                             .w_full()
+                                            .px_1p5()
+                                            .py_1()
+                                            .rounded_md()
                                             .cursor_pointer()
+                                            .hover(|s| s.bg(rgb(0x1b222d)))
                                             .flex()
                                             .flex_col()
                                             .gap_1()
@@ -2896,9 +3007,13 @@ impl ConsoleView {
                                                             .bg(rgb(0xe84142))
                                                             .text_color(rgb(0xffffff))
                                                             .text_size(px(11.))
-                                                            .on_click(move |_, _, _| {
+                                                            .on_click(cx.listener(move |this, _, _, cx| {
                                                                 HubApp::play_in_client(id);
-                                                            })
+                                                                this.show_toast(
+                                                                    "▶ 已在网易云客户端打开播放",
+                                                                    cx,
+                                                                );
+                                                            }))
                                                             .child("▶")
                                                     })),
                                             )
@@ -3062,6 +3177,9 @@ impl ConsoleView {
                             .flex_row()
                             .items_center()
                             .justify_between()
+                            // Wrap the toolbar so the export buttons stay usable at 900x600.
+                            .flex_wrap()
+                            .gap_2()
                             .pb_2()
                             .border_b_1()
                             .border_color(rgb(0x262c36))
@@ -3091,6 +3209,7 @@ impl ConsoleView {
                                 div()
                                     .flex()
                                     .flex_row()
+                                    .flex_wrap()
                                     .items_center()
                                     .gap_2()
                                     .child(
@@ -3345,9 +3464,10 @@ impl ConsoleView {
                                             .cursor_pointer()
                                             .bg(rgb(0x21262d))
                                             .text_size(px(11.))
-                                            .on_click(move |_, _, _| {
+                                            .on_click(cx.listener(move |this, _, _, cx| {
                                                 HubApp::play_in_client(id);
-                                            })
+                                                this.show_toast("▶ 已在网易云客户端打开播放", cx);
+                                            }))
                                             .child("▶")
                                     }))
                                     .children(can_manual_scrobble.then(|| {
@@ -3377,23 +3497,55 @@ impl ConsoleView {
                                             }))
                                             .child("补打卡")
                                     }))
-                                    .child(
+                                    .child({
+                                        // Deleting a play record is irreversible, so the first
+                                        // click only arms the row; a second click confirms.
+                                        let confirming = self.pending_delete == Some(play_id);
                                         div()
                                             .id(("rec-del", idx))
                                             .px_2()
                                             .py_0p5()
                                             .rounded_sm()
                                             .cursor_pointer()
-                                            .bg(rgb(0x21262d))
+                                            .bg(if confirming {
+                                                rgb(0xda3633)
+                                            } else {
+                                                rgb(0x21262d)
+                                            })
                                             .text_size(px(11.))
-                                            .text_color(rgb(0xff7b7c))
+                                            .text_color(if confirming {
+                                                rgb(0xffffff)
+                                            } else {
+                                                rgb(0xff7b7c)
+                                            })
                                             .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.hub.db.delete_play(play_id);
-                                                this.recent_rows = this.hub.db.recent(150);
-                                                this.show_toast("已删除该条播放记录", cx);
+                                                if this.pending_delete == Some(play_id) {
+                                                    this.pending_delete = None;
+                                                    this.hub.db.delete_play(play_id);
+                                                    this.recent_rows = this.hub.db.recent(150);
+                                                    this.show_toast("已删除该条播放记录", cx);
+                                                    return;
+                                                }
+                                                this.pending_delete = Some(play_id);
+                                                this.show_toast(
+                                                    "再次点击「确认删除」即永久删除该条记录（4 秒内有效）",
+                                                    cx,
+                                                );
+                                                cx.spawn(async move |this, cx| {
+                                                    cx.background_executor()
+                                                        .timer(Duration::from_secs(4))
+                                                        .await;
+                                                    let _ = this.update(cx, |view, cx| {
+                                                        if view.pending_delete == Some(play_id) {
+                                                            view.pending_delete = None;
+                                                            cx.notify();
+                                                        }
+                                                    });
+                                                })
+                                                .detach();
                                             }))
-                                            .child("✕"),
-                                    ),
+                                            .child(if confirming { "确认删除" } else { "✕" })
+                                    }),
                             )
                     }))
             )
@@ -4029,9 +4181,19 @@ impl ConsoleView {
             .flex()
             .items_center()
             .justify_center()
-            .on_mouse_down(MouseButton::Left, |_, _, _| {})
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    // Clicking the dimmed backdrop dismisses the poster.
+                    if this.wrapped_poster.take().is_some() {
+                        cx.notify();
+                    }
+                }),
+            )
             .child(
                 div()
+                    // Clicks inside the card must not bubble to the backdrop handler.
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .w(px(460.))
                     .p_4()
                     .rounded_xl()
@@ -4200,6 +4362,32 @@ fn get_console_hwnd() -> Option<windows::Win32::Foundation::HWND> {
     None
 }
 
+#[cfg(target_os = "windows")]
+fn apply_dark_titlebar(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+
+    unsafe {
+        // Native dark titlebar + caption colour matching the #0d1117 console theme.
+        let enabled: i32 = 1;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &enabled as *const i32 as *const core::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+        // COLORREF-style 0x00BBGGRR for #0d1117.
+        let caption: u32 = 0x0017_110d;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            &caption as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
 pub fn run_console_loop(
     hub: Arc<HubApp>,
     cmd_rx: std::sync::mpsc::Receiver<ConsoleCommand>,
@@ -4209,6 +4397,9 @@ pub fn run_console_loop(
 
     Application::new().run(move |cx: &mut App| {
         bind_input_keys(cx);
+        // Overlay shortcuts are window-global so they work even while a text field
+        // has focus.
+        cx.bind_keys([KeyBinding::new("escape", DismissOverlay, None)]);
 
         let bounds = Bounds::centered(None, size(px(1120.0), px(740.0)), cx);
         let window_opts = WindowOptions {
@@ -4242,6 +4433,11 @@ pub fn run_console_loop(
         }) else {
             return;
         };
+
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = get_console_hwnd() {
+            apply_dark_titlebar(hwnd);
+        }
 
         if open_on_start {
             cx.activate(true);

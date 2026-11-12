@@ -16,19 +16,22 @@ use windows::Win32::Graphics::Gdi::{
     DIB_RGB_COLORS, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
     FF_DONTCARE, HFONT, OUT_TT_PRECIS, TRANSPARENT, BLENDFUNCTION,
 };
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
     GetSystemMetrics, LoadCursorW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor,
-    ShowWindow, TranslateMessage, UpdateLayeredWindow, CS_HREDRAW, CS_VREDRAW, HTCAPTION,
-    IDC_ARROW, IDC_HAND, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE,
-     SetProcessDPIAware, ULW_ALPHA, WM_DESTROY, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_NCLBUTTONDOWN,
-    WM_SETCURSOR, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetWindowPos, ShowWindow, TranslateMessage, UpdateLayeredWindow, CS_HREDRAW, CS_VREDRAW,
+    HTCAPTION, IDC_ARROW, IDC_HAND, MSG, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER,
+    SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_DESTROY, WM_LBUTTONDOWN, WM_MOUSEMOVE,
+    WM_NCLBUTTONDOWN, WM_SETCURSOR, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
+const WM_DPICHANGED: u32 = 0x02E0;
 
 pub const WIDGET_WIDTH: u32 = 380;
 pub const WIDGET_HEIGHT: u32 = 72;
@@ -53,10 +56,10 @@ struct GdiFonts {
 }
 
 impl GdiFonts {
-    unsafe fn new() -> Self {
+    unsafe fn new(scale: f32) -> Self {
         // Title: 15px, weight 600 (Semibold), ClearType Natural Quality + TrueType Hinting
         let title_font = CreateFontW(
-            -15,
+            -((15.0 * scale).round() as i32),
             0,
             0,
             0,
@@ -74,7 +77,7 @@ impl GdiFonts {
 
         // Subtitle: 12px, weight 500 (Medium), ClearType Natural Quality + TrueType Hinting
         let subtitle_font = CreateFontW(
-            -12,
+            -((12.0 * scale).round() as i32),
             0,
             0,
             0,
@@ -120,6 +123,21 @@ pub struct WidgetWindow {
     cover_accent: (u8, u8, u8),
     cover_tx: Sender<(String, Pixmap, (u8, u8, u8))>,
     cover_rx: Receiver<(String, Pixmap, (u8, u8, u8))>,
+    /// Monitor DPI factor (1.0 = 96 DPI). The whole island is drawn at this
+    /// resolution and every mouse coordinate is divided by it.
+    scale: f32,
+}
+
+impl WidgetWindow {
+    /// Device transform: logical island coordinates -> physical pixels.
+    fn tf(&self) -> Transform {
+        Transform::from_scale(self.scale, self.scale)
+    }
+
+    /// Logical px -> physical px, snapped to whole pixels.
+    fn px(&self, v: f32) -> i32 {
+        (v * self.scale).round() as i32
+    }
 }
 
 pub fn spawn_widget_thread(
@@ -134,8 +152,6 @@ pub fn spawn_widget_thread(
             let hinstance = HINSTANCE(std::ptr::null_mut());
 
             unsafe {
-                let _ = SetProcessDPIAware();
-
                 let default_cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
                 let wc = WNDCLASSW {
                     style: CS_HREDRAW | CS_VREDRAW,
@@ -168,8 +184,24 @@ pub fn spawn_widget_thread(
                 )
                 .expect("Failed to create widget window");
 
-                let fonts = GdiFonts::new();
-                let shadow_pixmap = precompute_gaussian_shadow();
+                // The manifest declares PerMonitorV2, so this process owns its scaling:
+                // query the monitor DPI and grow the island to physical pixels instead of
+                // letting the system bitmap-stretch a 96-DPI window.
+                let scale = widget_scale(hwnd);
+                let win_w = (WIDGET_WIDTH as f32 * scale).round() as i32;
+                let win_h = (WIDGET_HEIGHT as f32 * scale).round() as i32;
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    screen_w - win_w - (36.0 * scale).round() as i32,
+                    screen_h - win_h - (84.0 * scale).round() as i32,
+                    win_w,
+                    win_h,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+
+                let fonts = GdiFonts::new(scale);
+                let shadow_pixmap = precompute_gaussian_shadow(scale);
                 let (cover_tx, cover_rx) = channel();
 
                 let mut widget = Box::new(WidgetWindow {
@@ -186,6 +218,7 @@ pub fn spawn_widget_thread(
                     cover_accent: (245, 245, 247),
                     cover_tx,
                     cover_rx,
+                    scale,
                 });
 
                 widget.render_and_flush();
@@ -296,8 +329,8 @@ unsafe extern "system" fn widget_wnd_proc(
             };
             let _ = TrackMouseEvent(&mut tme);
 
-            let x = (lparam.0 & 0xffff) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xffff) as i16 as f32;
+            let x = (lparam.0 & 0xffff) as i16 as f32 / widget.scale;
+            let y = ((lparam.0 >> 16) & 0xffff) as i16 as f32 / widget.scale;
 
             let in_pill = x >= PILL_X
                 && x <= PILL_X + PILL_W
@@ -354,9 +387,36 @@ unsafe extern "system" fn widget_wnd_proc(
             widget.render_and_flush();
             LRESULT(0)
         }
+        WM_DPICHANGED => {
+            // PerMonitorV2: the window is moved to a monitor with a different scale.
+            let new_dpi = (wparam.0 & 0xffff) as u32;
+            let new_scale = (new_dpi as f32 / 96.0).clamp(1.0, 3.0);
+            if (new_scale - widget.scale).abs() > 0.01 {
+                widget.scale = new_scale;
+                widget.fonts = GdiFonts::new(new_scale);
+                widget.shadow_pixmap = precompute_gaussian_shadow(new_scale);
+
+                // lParam points at the rect Windows suggests for the new DPI.
+                let suggested = lparam.0 as *const RECT;
+                if !suggested.is_null() {
+                    let r = *suggested;
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        r.left,
+                        r.top,
+                        r.right - r.left,
+                        r.bottom - r.top,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+                widget.render_and_flush();
+            }
+            LRESULT(0)
+        }
         WM_LBUTTONDOWN => {
-            let x = (lparam.0 & 0xffff) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xffff) as i16 as f32;
+            let x = (lparam.0 & 0xffff) as i16 as f32 / widget.scale;
+            let y = ((lparam.0 >> 16) & 0xffff) as i16 as f32 / widget.scale;
 
             let in_btn = |(cx, cy, r): (f32, f32, f32)| -> bool {
                 let dx = x - cx;
@@ -497,7 +557,7 @@ impl WidgetWindow {
             let mut paint = Paint::default();
             paint.shader = s;
             paint.anti_alias = true;
-            pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(&path, &paint, FillRule::Winding, self.tf(), None);
         }
 
         // Ultra-subtle specular inner rim (1px integer stroke)
@@ -516,8 +576,8 @@ impl WidgetWindow {
             stroke_paint.shader = rs;
             stroke_paint.anti_alias = true;
             let mut stroke = tiny_skia::Stroke::default();
-            stroke.width = 1.0;
-            pixmap.stroke_path(&path, &stroke_paint, &stroke, Transform::identity(), None);
+            stroke.width = 1.0 * self.scale;
+            pixmap.stroke_path(&path, &stroke_paint, &stroke, self.tf(), None);
         }
     }
 
@@ -546,6 +606,10 @@ impl WidgetWindow {
             if let Some(n) = now {
                 if !n.cover.is_empty() {
                     let url = n.cover.clone();
+                    // Decode at logical size: the disc path is drawn through the DPI
+                    // transform, and the pattern maps 1:1 in path space (see the
+                    // Pattern::new call below), so a larger texture would be cropped.
+                    let cover_px = 36u32;
                     self.app.rt.spawn(async move {
                         let client = reqwest::Client::builder()
                             .timeout(std::time::Duration::from_secs(8))
@@ -561,7 +625,7 @@ impl WidgetWindow {
 
                         if let Ok(resp) = req.send().await {
                             if let Ok(bytes) = resp.bytes().await {
-                                if let Some((px, accent)) = decode_cover_to_pixmap(&bytes, 36) {
+                                if let Some((px, accent)) = decode_cover_to_pixmap(&bytes, cover_px) {
                                     let _ = tx.send((cover_key, px, accent));
                                 }
                             }
@@ -594,19 +658,19 @@ impl WidgetWindow {
                 trans,
             );
             cover_paint.anti_alias = true;
-            pixmap.fill_path(&disc_path, &cover_paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(&disc_path, &cover_paint, FillRule::Winding, self.tf(), None);
 
             let mut rim_paint = Paint::default();
             rim_paint.set_color_rgba8(255, 255, 255, 24);
             rim_paint.anti_alias = true;
             let mut rim_stroke = tiny_skia::Stroke::default();
-            rim_stroke.width = 1.0;
-            pixmap.stroke_path(&disc_path, &rim_paint, &rim_stroke, Transform::identity(), None);
+            rim_stroke.width = 1.0 * self.scale;
+            pixmap.stroke_path(&disc_path, &rim_paint, &rim_stroke, self.tf(), None);
         } else {
             let mut bg_paint = Paint::default();
             bg_paint.set_color_rgba8(22, 22, 27, 255);
             bg_paint.anti_alias = true;
-            pixmap.fill_path(&disc_path, &bg_paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(&disc_path, &bg_paint, FillRule::Winding, self.tf(), None);
 
             let mut note_paint = Paint::default();
             note_paint.set_color_rgba8(130, 130, 140, 255);
@@ -615,7 +679,7 @@ impl WidgetWindow {
             let mut head_pb = PathBuilder::new();
             head_pb.push_circle(cx - 1.5, cy + 3.0, 2.5);
             if let Some(hp) = head_pb.finish() {
-                pixmap.fill_path(&hp, &note_paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&hp, &note_paint, FillRule::Winding, self.tf(), None);
             }
 
             let mut stem_pb = PathBuilder::new();
@@ -623,11 +687,11 @@ impl WidgetWindow {
             stem_pb.line_to(cx + 0.5, cy - 4.5);
             stem_pb.quad_to(cx + 4.0, cy - 3.8, cx + 4.0, cy - 1.0);
             let mut stem_stroke = tiny_skia::Stroke::default();
-            stem_stroke.width = 1.4;
+            stem_stroke.width = 1.4 * self.scale;
             stem_stroke.line_cap = tiny_skia::LineCap::Round;
             stem_stroke.line_join = tiny_skia::LineJoin::Round;
             if let Some(sp) = stem_pb.finish() {
-                pixmap.stroke_path(&sp, &note_paint, &stem_stroke, Transform::identity(), None);
+                pixmap.stroke_path(&sp, &note_paint, &stem_stroke, self.tf(), None);
             }
         }
     }
@@ -658,7 +722,7 @@ impl WidgetWindow {
         let mut bg_paint = Paint::default();
         bg_paint.set_color_rgba8(255, 255, 255, 18);
         bg_paint.anti_alias = true;
-        pixmap.fill_path(&bg_path, &bg_paint, FillRule::Winding, Transform::identity(), None);
+        pixmap.fill_path(&bg_path, &bg_paint, FillRule::Winding, self.tf(), None);
 
         let fill_w = (track_w * ratio).round().max(2.0);
         let fill_path = build_rounded_rect(track_x, track_y, fill_w, track_h, 1.0);
@@ -681,7 +745,7 @@ impl WidgetWindow {
             fill_paint.set_color_rgba8(ar, ag, ab, 225);
         }
         fill_paint.anti_alias = true;
-        pixmap.fill_path(&fill_path, &fill_paint, FillRule::Winding, Transform::identity(), None);
+        pixmap.fill_path(&fill_path, &fill_paint, FillRule::Winding, self.tf(), None);
     }
 
     fn draw_symmetric_waveform(
@@ -720,7 +784,7 @@ impl WidgetWindow {
             let bx = start_x + (i as f32 * 5.0);
             let by = (PILL_CY - h * 0.5).round();
             let path = build_rounded_rect(bx, by, 3.0, h, 1.5);
-            pixmap.fill_path(&path, &wave_paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(&path, &wave_paint, FillRule::Winding, self.tf(), None);
         }
     }
 
@@ -764,7 +828,7 @@ impl WidgetWindow {
                     } else {
                         bg_paint.set_color_rgba8(255, 255, 255, (32.0 * alpha) as u8);
                     }
-                    pixmap.fill_path(&cp, &bg_paint, FillRule::Winding, Transform::identity(), None);
+                    pixmap.fill_path(&cp, &bg_paint, FillRule::Winding, self.tf(), None);
                 }
             }
 
@@ -813,12 +877,12 @@ impl WidgetWindow {
 
                 if let Some(p) = pb.finish() {
                     if is_liked {
-                        pixmap.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+                        pixmap.fill_path(&p, &paint, FillRule::Winding, self.tf(), None);
                     } else {
                         let mut stroke = tiny_skia::Stroke::default();
-                        stroke.width = 1.4;
+                        stroke.width = 1.4 * self.scale;
                         stroke.line_join = tiny_skia::LineJoin::Round;
-                        pixmap.stroke_path(&p, &paint, &stroke, Transform::identity(), None);
+                        pixmap.stroke_path(&p, &paint, &stroke, self.tf(), None);
                     }
                 }
             }
@@ -832,10 +896,10 @@ impl WidgetWindow {
                 pb.line_to(cx + 3.0, cy + 3.0);
 
                 let mut stroke = tiny_skia::Stroke::default();
-                stroke.width = 1.4;
+                stroke.width = 1.4 * self.scale;
                 stroke.line_cap = tiny_skia::LineCap::Round;
                 if let Some(p) = pb.finish() {
-                    pixmap.stroke_path(&p, &paint, &stroke, Transform::identity(), None);
+                    pixmap.stroke_path(&p, &paint, &stroke, self.tf(), None);
                 }
             }
             "play" => {
@@ -845,13 +909,13 @@ impl WidgetWindow {
                 pb.line_to(cx - 2.5, cy + 4.5);
                 pb.close();
                 if let Some(p) = pb.finish() {
-                    pixmap.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+                    pixmap.fill_path(&p, &paint, FillRule::Winding, self.tf(), None);
                 }
             }
             "console" => {
                 let mut pb = PathBuilder::new();
                 let mut stroke = tiny_skia::Stroke::default();
-                stroke.width = 1.4;
+                stroke.width = 1.4 * self.scale;
                 stroke.line_cap = tiny_skia::LineCap::Round;
                 stroke.line_join = tiny_skia::LineJoin::Round;
 
@@ -861,7 +925,7 @@ impl WidgetWindow {
                 pb.line_to(cx + 3.5, cy - 3.5);
                 pb.line_to(cx + 3.5, cy + 0.5);
                 if let Some(p) = pb.finish() {
-                    pixmap.stroke_path(&p, &paint, &stroke, Transform::identity(), None);
+                    pixmap.stroke_path(&p, &paint, &stroke, self.tf(), None);
                 }
             }
             "close" => {
@@ -870,7 +934,7 @@ impl WidgetWindow {
                 }
                 let mut pb = PathBuilder::new();
                 let mut stroke = tiny_skia::Stroke::default();
-                stroke.width = 1.4;
+                stroke.width = 1.4 * self.scale;
                 stroke.line_cap = tiny_skia::LineCap::Round;
 
                 pb.move_to(cx - 3.2, cy - 3.2);
@@ -878,7 +942,7 @@ impl WidgetWindow {
                 pb.move_to(cx + 3.2, cy - 3.2);
                 pb.line_to(cx - 3.2, cy + 3.2);
                 if let Some(p) = pb.finish() {
-                    pixmap.stroke_path(&p, &paint, &stroke, Transform::identity(), None);
+                    pixmap.stroke_path(&p, &paint, &stroke, self.tf(), None);
                 }
             }
             _ => {}
@@ -890,8 +954,8 @@ impl WidgetWindow {
         pixmap: &Pixmap,
         now: Option<&crate::monitor::PlaySnapshot>,
     ) {
-        let w = WIDGET_WIDTH as i32;
-        let h = WIDGET_HEIGHT as i32;
+        let w = pixmap.width() as i32;
+        let h = pixmap.height() as i32;
 
         unsafe {
             let screen_dc = GetDC(None);
@@ -946,8 +1010,8 @@ impl WidgetWindow {
                 None => ("等待音乐播放", "打开任意音乐软件即可联动"),
             };
 
-            let text_left = (PILL_X as i32) + 52;
-            let max_text_w = (242.0 - (self.hover_anim * 78.0)).round() as i32;
+            let text_left = self.px(PILL_X) + self.px(52.0);
+            let max_text_w = self.px(242.0 - (self.hover_anim * 78.0));
             let text_right = text_left + max_text_w;
 
             SetBkMode(mem_dc, TRANSPARENT);
@@ -958,9 +1022,9 @@ impl WidgetWindow {
             let mut title_utf16: Vec<u16> = title.encode_utf16().collect();
             let mut title_rc = RECT {
                 left: text_left,
-                top: (PILL_Y as i32) + 7,
+                top: self.px(PILL_Y) + self.px(7.0),
                 right: text_right,
-                bottom: (PILL_Y as i32) + 28,
+                bottom: self.px(PILL_Y) + self.px(28.0),
             };
             DrawTextW(
                 mem_dc,
@@ -975,9 +1039,9 @@ impl WidgetWindow {
             let mut artist_utf16: Vec<u16> = artist.encode_utf16().collect();
             let mut artist_rc = RECT {
                 left: text_left,
-                top: (PILL_Y as i32) + 27,
+                top: self.px(PILL_Y) + self.px(27.0),
                 right: text_right,
-                bottom: (PILL_Y as i32) + 45,
+                bottom: self.px(PILL_Y) + self.px(45.0),
             };
             DrawTextW(
                 mem_dc,
@@ -989,8 +1053,8 @@ impl WidgetWindow {
             SelectObject(mem_dc, old_font);
 
             // Restore Alpha = 255 across the opaque text bounding box (since GDI DrawTextW zeroes out the alpha byte)
-            let fix_top = ((PILL_Y as i32) + 6).max(0);
-            let fix_bottom = ((PILL_Y as i32) + 46).min(h);
+            let fix_top = (self.px(PILL_Y) + self.px(6.0)).max(0);
+            let fix_bottom = (self.px(PILL_Y) + self.px(46.0)).min(h);
             let fix_left = text_left.max(0);
             let fix_right = text_right.min(w);
             for py in fix_top..fix_bottom {
@@ -1030,22 +1094,38 @@ impl WidgetWindow {
     }
 }
 
+/// Monitor DPI factor for a window, clamped to the range the layout can render.
+fn widget_scale(hwnd: HWND) -> f32 {
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let dpi = if dpi == 0 { 96 } else { dpi };
+    (dpi as f32 / 96.0).clamp(1.0, 3.0)
+}
+
 /// Precomputes a true 3-pass separable Gaussian-blurred ambient shadow once at startup.
-fn precompute_gaussian_shadow() -> Pixmap {
-    let w = WIDGET_WIDTH as usize;
-    let h = WIDGET_HEIGHT as usize;
-    let mut px = Pixmap::new(WIDGET_WIDTH, WIDGET_HEIGHT).unwrap();
+fn precompute_gaussian_shadow(scale: f32) -> Pixmap {
+    let w32 = (WIDGET_WIDTH as f32 * scale).round() as u32;
+    let h32 = (WIDGET_HEIGHT as f32 * scale).round() as u32;
+    let w = w32 as usize;
+    let h = h32 as usize;
+    let mut px = Pixmap::new(w32, h32).unwrap();
     px.fill(Color::TRANSPARENT);
 
     let mut paint = Paint::default();
     paint.set_color_rgba8(0, 0, 0, 56);
     paint.anti_alias = true;
     let path = build_rounded_rect(PILL_X + 1.0, PILL_Y + 3.0, PILL_W - 2.0, PILL_H, PILL_RADIUS);
-    px.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    px.fill_path(
+        &path,
+        &paint,
+        FillRule::Winding,
+        Transform::from_scale(scale, scale),
+        None,
+    );
 
     let mut alpha_buf: Vec<f32> = px.data().iter().skip(3).step_by(4).map(|&a| a as f32).collect();
     let mut temp_buf = vec![0.0f32; w * h];
-    let radius: isize = 4;
+    // Blur radius in physical pixels, so the halo keeps the same visual size at any DPI.
+    let radius: isize = (4.0 * scale).round().max(1.0) as isize;
     let kernel_len = (radius * 2 + 1) as f32;
 
     for _ in 0..3 {

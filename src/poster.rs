@@ -49,6 +49,20 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_ski
     pb.finish()
 }
 
+/// Microsoft YaHei UI (the only face the poster loads) has no colour-emoji glyphs, so
+/// astral-plane characters would be drawn as tofu boxes. Drop them so a stray emoji in
+/// a song title or label degrades to plain text instead of breaking the layout.
+fn sanitize_for_gdi(text: &str) -> String {
+    text.chars()
+        .filter(|c| {
+            let u = *c as u32;
+            // Astral-plane emoji, replacement chars, and emoji presentation /
+            // zero-width joiners that would draw as boxes in a plain GDI font.
+            u <= 0xFFFF && u != 0xFFFD && u != 0xFE0F && u != 0xFE0E && u != 0x200D
+        })
+        .collect()
+}
+
 unsafe fn make_font(height_px: i32, weight: i32, italic: u32) -> HFONT {
     CreateFontW(
         -height_px,
@@ -252,18 +266,18 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
     }
     let (persona, quote) = if (0..6).contains(&peak_h) {
         (
-            "🌙 深夜造梦家",
+            "深夜造梦家",
             "“当世界进入沉睡，你的灵魂在旋律中肆意漫游”",
         )
     } else if (6..12).contains(&peak_h) {
         (
-            "🌅 晨光独奏者",
+            "晨光独奏者",
             "“清晨的第一缕微光，伴随跃动的音符一同苏醒”",
         )
     } else if (12..18).contains(&peak_h) {
-        ("☀️ 午后心流体", "“沉浸在专注的节奏中，把灵感酿成现实”")
+        ("午后心流体", "“沉浸在专注的节奏中，把灵感酿成现实”")
     } else {
-        ("🌆 暮光旅人", "“卸下白昼的喧嚣，在晚风里与好歌同频共振”")
+        ("暮光旅人", "“卸下白昼的喧嚣，在晚风里与好歌同频共振”")
     };
 
     let mins = ((d.totals.ms as f64) / 60000.0).round() as i64;
@@ -350,7 +364,7 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
             |font: HFONT, col: COLORREF, left: i32, top: i32, right: i32, bottom: i32, text: &str, align_right: bool| {
                 SelectObject(mem_dc, font);
                 SetTextColor(mem_dc, col);
-                let mut utf16: Vec<u16> = text.encode_utf16().collect();
+                let mut utf16: Vec<u16> = sanitize_for_gdi(text).encode_utf16().collect();
                 let mut rc = RECT {
                     left,
                     top,
@@ -381,7 +395,7 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
             52,
             500,
             88,
-            "🎵 MUSIC HUB · 听歌画像报告",
+            "♪ MUSIC HUB · 听歌画像报告",
             false,
         );
         let period_str = if days >= 365 {
@@ -424,10 +438,11 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
             446,
             500,
             480,
-            "🎤 灵魂常听音乐人 TOP 3",
+            "♪ 灵魂常听音乐人 TOP 3",
             false,
         );
-        let medals = ["🥇", "🥈", "🥉"];
+        // GDI has no colour emoji: use enclosed digits that Microsoft YaHei ships.
+        let medals = ["①", "②", "③"];
         if d.top_artists.is_empty() {
             draw_str(
                 f_body,
@@ -474,7 +489,7 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
             668,
             500,
             702,
-            "💚 本期真爱单曲（完播率最高）",
+            "♥ 本期真爱单曲（完播率最高）",
             false,
         );
         if let Some(loved) = d.loved.first() {
@@ -498,6 +513,12 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
                 &format!("{} · 完整听完 {} 次", loved.artist, loved.c),
                 false,
             );
+            // Real completion rate for this track: completed plays / total plays.
+            let rate = if loved.n > 0 {
+                ((loved.c as f64 / loved.n as f64) * 100.0).round() as i64
+            } else {
+                0
+            };
             draw_str(
                 f_body_b,
                 c_green,
@@ -505,7 +526,7 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
                 710,
                 (w as i32) - 74,
                 774,
-                "100% 真爱完播",
+                &format!("{}% 真爱完播", rate),
                 true,
             );
         } else {
@@ -529,7 +550,7 @@ pub fn render_wrapped_poster(d: &StatsResponse, days: i64) -> WrappedPoster {
             788,
             500,
             820,
-            "🎯 智能推荐闭环满意度",
+            "◎ 智能推荐闭环满意度",
             false,
         );
         let rec_text = if d.recs.total > 0 {
