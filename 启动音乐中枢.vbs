@@ -2,7 +2,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 dir = fso.GetParentFolderName(WScript.ScriptFullName)
 exePath = fso.BuildPath(dir, "MusicHub.exe")
 If fso.FileExists(exePath) Then
-    CreateObject("WScript.Shell").Run """" & exePath & """", 0, False
+    CreateObject("WScript.Shell").Run """" & exePath & """", 1, False
 Else
     hub = fso.BuildPath(dir, "hub.py")
     pyw = "pythonw"

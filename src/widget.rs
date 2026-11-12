@@ -445,8 +445,7 @@ impl WidgetWindow {
     }
 
     fn on_btn_console(&self) {
-        let url = self.app.base_url();
-        let _ = open::that(url);
+        self.app.open_console_window(None);
     }
 
     fn render_and_flush(&mut self) {

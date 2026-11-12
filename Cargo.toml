@@ -7,6 +7,10 @@ edition = "2021"
 name = "MusicHub"
 path = "src/main.rs"
 
+[lib]
+name = "music_hub"
+path = "src/lib.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["macros"] }
@@ -37,7 +41,10 @@ urlencoding = "2.1"
 base64 = "0.22"
 fontdue = "0.9"
 tiny-skia = "0.11"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+gpui = { version = "0.2.2", default-features = false, features = ["font-kit"] }
+smallvec = "1.6"
+unicode-segmentation = "1.10"
 regex = "1.10"
 md-5 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }

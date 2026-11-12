@@ -30,7 +30,7 @@ fn default_port() -> u16 {
     8765
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigData {
     #[serde(default)]
     pub api_key: String,
@@ -65,7 +65,7 @@ impl Default for ConfigData {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicConfig {
     pub api_key_set: bool,
     pub api_secret_set: bool,

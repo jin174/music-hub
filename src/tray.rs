@@ -227,7 +227,7 @@ unsafe extern "system" fn tray_wnd_proc(
             if event == WM_RBUTTONUP {
                 show_tray_menu(hwnd, &app_ref);
             } else if event == WM_LBUTTONUP || event == WM_LBUTTONDBLCLK {
-                let _ = open::that(app_ref.base_url());
+                app_ref.open_console_window(None);
             }
             LRESULT(0)
         }
@@ -235,17 +235,20 @@ unsafe extern "system" fn tray_wnd_proc(
             let cmd_id = (wparam.0 & 0xffff) as usize;
             match cmd_id {
                 ID_TRAY_CONSOLE => {
-                    let _ = open::that(app_ref.base_url());
+                    app_ref.open_console_window(None);
                 }
                 ID_TRAY_MINI => {
-                    let _ = app_ref.open_mini_window();
+                    app_ref.open_mini_window_sync();
                 }
                 ID_TRAY_RECORD => {
                     app_ref.cfg.update(|d| d.mode = "record".to_string());
                 }
                 ID_TRAY_SCROBBLE => {
                     if !app_ref.cfg.is_authorized() {
-                        let _ = open::that(format!("{}/#settings", app_ref.base_url()));
+                        app_ref.open_console_with_toast(
+                            Some("settings"),
+                            Some("请先完成 Last.fm 授权后再开启打卡模式".to_string()),
+                        );
                     } else {
                         app_ref.cfg.update(|d| d.mode = "scrobble".to_string());
                         app_ref.scrobbler.kick();

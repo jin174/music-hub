@@ -65,7 +65,7 @@ impl CurrentPlay {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlaySnapshot {
     pub play_id: i64,
     pub title: String,
@@ -85,6 +85,13 @@ pub struct PlaySnapshot {
     pub lookup: String,
     pub started_at: i64,
     pub app: String,
+}
+
+impl PlaySnapshot {
+    pub fn cover_key(&self) -> String {
+        let b_len = self.cover_bytes.as_ref().map(|b| b.len()).unwrap_or(0);
+        format!("{}:{}:{}", self.play_id, self.cover, b_len)
+    }
 }
 
 #[derive(Clone)]
@@ -638,5 +645,98 @@ impl Monitor {
             if completed == 1 { " completed" } else { "" },
             if skipped == 1 { " skipped" } else { "" }
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_cover_key_late_bytes_divergence() {
+        let mut snapshot = PlaySnapshot {
+            play_id: 101,
+            title: "Sample Song".to_string(),
+            artist: "Artist".to_string(),
+            artists: vec!["Artist".to_string()],
+            album: "Album".to_string(),
+            cover: String::new(),
+            cover_bytes: None,
+            ncm_id: None,
+            duration_ms: 180_000,
+            played_ms: 0,
+            threshold_ms: Some(90_000),
+            threshold_reached: false,
+            scrobble_state: "none".to_string(),
+            playing: true,
+            lookup: "pending".to_string(),
+            started_at: 1000,
+            app: "spotify.exe".to_string(),
+        };
+
+        // Tick 0: Initial track start (no thumbnail bytes)
+        let key_0 = snapshot.cover_key();
+        assert_eq!(key_0, "101::0");
+
+        // Tick 1: SMTC thumbnail arrives
+        snapshot.cover_bytes = Some(Arc::new(vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4]));
+        let key_1 = snapshot.cover_key();
+        assert_eq!(key_1, "101::8");
+        assert_ne!(key_0, key_1, "Late SMTC bytes MUST trigger key divergence!");
+
+        // Tick 2: Stable tick (identical key, prevents redundant decode)
+        let key_2 = snapshot.cover_key();
+        assert_eq!(key_1, key_2);
+
+        // Tick 3: NCM online URL arrives
+        snapshot.cover = "https://p1.music.126.net/xyz.jpg".to_string();
+        let key_3 = snapshot.cover_key();
+        assert_eq!(key_3, "101:https://p1.music.126.net/xyz.jpg:8");
+        assert_ne!(key_1, key_3);
+    }
+
+    #[test]
+    fn test_play_snapshot_equality() {
+        let snap1 = PlaySnapshot {
+            play_id: 1,
+            title: "Song".into(),
+            artist: "Artist".into(),
+            artists: vec!["Artist".into()],
+            album: "Album".into(),
+            cover: "".into(),
+            cover_bytes: None,
+            ncm_id: None,
+            duration_ms: 200_000,
+            played_ms: 50_000,
+            threshold_ms: Some(100_000),
+            threshold_reached: false,
+            scrobble_state: "pending".into(),
+            playing: true,
+            lookup: "Artist - Song".into(),
+            started_at: 1000,
+            app: "cloudmusic.exe".into(),
+        };
+        let mut snap2 = snap1.clone();
+        assert_eq!(snap1, snap2);
+
+        // Cover bytes change detection
+        snap2.cover_bytes = Some(Arc::new(vec![1, 2, 3]));
+        assert_ne!(snap1, snap2);
+
+        let mut snap3 = snap2.clone();
+        assert_eq!(snap2, snap3);
+        snap3.cover_bytes = Some(Arc::new(vec![1, 2, 4]));
+        assert_ne!(snap2, snap3);
+
+        // Progress tick change detection
+        let mut snap4 = snap1.clone();
+        snap4.played_ms += 1000;
+        assert_ne!(snap1, snap4);
+
+        // Scrobble state change detection
+        let mut snap5 = snap1.clone();
+        snap5.scrobble_state = "done".into();
+        assert_ne!(snap1, snap5);
     }
 }

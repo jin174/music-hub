@@ -1,0 +1,13 @@
+pub mod app;
+pub mod config;
+pub mod db;
+pub mod lastfm;
+pub mod monitor;
+pub mod ncm;
+pub mod normalize;
+pub mod poster;
+pub mod scrobbler;
+pub mod server;
+pub mod tray;
+pub mod ui;
+pub mod widget;

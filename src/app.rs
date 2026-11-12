@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppStateResponse {
     pub now: Option<PlaySnapshot>,
     pub config: crate::config::PublicConfig,
@@ -134,6 +134,14 @@ pub enum WidgetCommand {
     Quit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConsoleCommand {
+    Open {
+        tab: Option<String>,
+        toast: Option<String>,
+    },
+}
+
 #[derive(Clone)]
 pub struct App {
     pub cfg: Config,
@@ -142,7 +150,8 @@ pub struct App {
     pub lf: Lastfm,
     pub scrobbler: Scrobbler,
     pub monitor: Monitor,
-    pub widget_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<WidgetCommand>>>>,
+    pub widget_tx: Arc<std::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<WidgetCommand>>>>,
+    pub console_tx: Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<ConsoleCommand>>>>,
     pub rt: tokio::runtime::Handle,
 }
 
@@ -161,7 +170,8 @@ impl App {
             lf,
             scrobbler,
             monitor,
-            widget_tx: Arc::new(tokio::sync::RwLock::new(None)),
+            widget_tx: Arc::new(std::sync::RwLock::new(None)),
+            console_tx: Arc::new(std::sync::Mutex::new(None)),
             rt,
         }
     }
@@ -214,11 +224,33 @@ impl App {
         None
     }
 
+    pub fn open_mini_window_sync(&self) -> bool {
+        if let Ok(guard) = self.widget_tx.read() {
+            if let Some(ref tx) = *guard {
+                let _ = tx.send(WidgetCommand::Show);
+                return true;
+            }
+        }
+        false
+    }
+
     pub async fn open_mini_window(&self) -> bool {
-        let guard = self.widget_tx.read().await;
-        if let Some(ref tx) = *guard {
-            let _ = tx.send(WidgetCommand::Show);
-            return true;
+        self.open_mini_window_sync()
+    }
+
+    pub fn open_console_window(&self, tab: Option<&str>) -> bool {
+        self.open_console_with_toast(tab, None)
+    }
+
+    pub fn open_console_with_toast(&self, tab: Option<&str>, toast: Option<String>) -> bool {
+        if let Ok(guard) = self.console_tx.lock() {
+            if let Some(ref tx) = *guard {
+                let _ = tx.send(ConsoleCommand::Open {
+                    tab: tab.map(|s| s.to_string()),
+                    toast,
+                });
+                return true;
+            }
         }
         false
     }
@@ -896,5 +928,49 @@ impl App {
     pub fn export_backup(&self) -> Vec<u8> {
         self.db.checkpoint_truncate();
         std::fs::read(&self.db.path).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_state_response_equality() {
+        let cfg = crate::config::PublicConfig {
+            api_key_set: true,
+            api_secret_set: true,
+            authorized: true,
+            username: "testuser".into(),
+            mode: "scrobble".into(),
+            port: 8765,
+            apps: vec!["cloudmusic.exe".into()],
+            scrobble_unmatched: false,
+        };
+        let state1 = AppStateResponse {
+            now: None,
+            config: cfg.clone(),
+            scrobbling: true,
+            pending: 0,
+            last_error: None,
+            last_ok: Some(1000),
+            session_app: Some("cloudmusic.exe".into()),
+        };
+        let mut state2 = state1.clone();
+        assert_eq!(state1, state2);
+
+        // Pending queue count change
+        state2.pending = 1;
+        assert_ne!(state1, state2);
+
+        // Error report change
+        let mut state3 = state1.clone();
+        state3.last_error = Some("Network timeout".into());
+        assert_ne!(state1, state3);
+
+        // Config change
+        let mut state4 = state1.clone();
+        state4.config.authorized = false;
+        assert_ne!(state1, state4);
     }
 }
