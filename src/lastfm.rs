@@ -255,6 +255,16 @@ impl Lastfm {
         Ok(())
     }
 
+    pub async fn unlove(&self, artist: &str, track: &str) -> Result<(), String> {
+        let mut p = BTreeMap::new();
+        p.insert("artist".to_string(), artist.to_string());
+        p.insert("track".to_string(), track.to_string());
+        let cfg_data = self.cfg.get_data();
+        p.insert("sk".to_string(), cfg_data.session_key);
+        self.call("track.unlove", p, true, true).await?;
+        Ok(())
+    }
+
     pub async fn similar_tracks(
         &self,
         track: &str,

@@ -548,6 +548,23 @@ impl DB {
         true
     }
 
+    /// Current feedback action ("like" / "dislike") for a single track, if any.
+    pub fn get_feedback(&self, title: &str, artist: &str) -> Option<String> {
+        let tk = norm(title.trim());
+        let first_art = artist.split('/').next().unwrap_or("").trim();
+        let ak = norm(first_art);
+        if tk.is_empty() {
+            return None;
+        }
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT action FROM feedback WHERE title_key=? AND artist_key=?",
+            params![tk, ak],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    }
+
     pub fn get_feedback_map(&self) -> HashMap<(String, String), String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -635,5 +652,34 @@ mod tests {
         db.set_feedback("Song A", "Artist 1", "like");
         let fb_map = db.get_feedback_map();
         assert_eq!(fb_map.get(&(norm("Song A"), norm("Artist 1"))), Some(&"like".to_string()));
+    }
+
+    #[test]
+    fn test_get_feedback_single_track_lookup() {
+        let db = DB::open_in_memory().unwrap();
+
+        assert_eq!(db.get_feedback("Song B", "Artist 2"), None);
+
+        db.set_feedback("Song B", "Artist 2", "like");
+        assert_eq!(db.get_feedback("Song B", "Artist 2"), Some("like".to_string()));
+
+        // The player bar passes the full artist string; the lookup must key on the first
+        // artist only, exactly like set_feedback does.
+        assert_eq!(
+            db.get_feedback("Song B", "Artist 2 / Guest"),
+            Some("like".to_string())
+        );
+
+        // Version suffixes stay independent: a Live take never inherits the studio decision.
+        assert_eq!(db.get_feedback("Song B (Live)", "Artist 2"), None);
+
+        db.set_feedback("Song B", "Artist 2", "remove");
+        assert_eq!(db.get_feedback("Song B", "Artist 2"), None);
+
+        db.set_feedback("Song B", "Artist 2", "dislike");
+        assert_eq!(
+            db.get_feedback("Song B", "Artist 2"),
+            Some("dislike".to_string())
+        );
     }
 }

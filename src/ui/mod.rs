@@ -56,6 +56,21 @@ impl NavTab {
     }
 }
 
+/// Shorten a message for compact surfaces, collapsing newlines and keeping whole
+/// characters so CJK text is never cut mid-scalar.
+fn ellipsize(text: &str, max_chars: usize) -> String {
+    let flat = text.replace(['\r', '\n'], " ");
+    let mut out = String::new();
+    for (i, ch) in flat.chars().enumerate() {
+        if i >= max_chars {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 pub fn format_app_name(app_id: &str) -> &'static str {
     let s = app_id.to_lowercase();
     if s.contains("cloudmusic") {
@@ -180,6 +195,9 @@ pub struct ConsoleView {
     state: AppStateResponse,
     now_cover_key: String,
     now_cover_img: Option<Arc<RenderImage>>,
+    /// Feedback action of the track currently playing ("like" / "dislike"), kept
+    /// in sync with the database so the bottom bar heart reflects the real state.
+    now_feedback: Option<String>,
 
     // Radar state
     track_input: Entity<TextInput>,
@@ -229,6 +247,9 @@ impl ConsoleView {
         let now = hub.monitor.snapshot();
         let pending = hub.db.count_pending_scrobbles();
         let session_app = hub.monitor.session_app.read().unwrap().clone();
+        let now_feedback = now
+            .as_ref()
+            .and_then(|n| hub.db.get_feedback(&n.title, &n.artist));
 
         let state = AppStateResponse {
             now,
@@ -313,6 +334,7 @@ impl ConsoleView {
             state,
             now_cover_key: String::new(),
             now_cover_img: None,
+            now_feedback,
             track_input,
             artist_input,
             radar_loading: false,
@@ -538,6 +560,38 @@ impl ConsoleView {
             "dislike" => format!("🚫 已加入避雷黑名单：{} - {}", artist, title),
             _ => format!("已取消偏好标记：{} - {}", artist, title),
         };
+
+        // The bottom player bar shows the same heart, so mirror the new state when
+        // the toggled track is the one currently playing.
+        if self
+            .state
+            .now
+            .as_ref()
+            .is_some_and(|n| n.title == title && n.artist == artist)
+        {
+            self.now_feedback = new_fb_opt.clone();
+        }
+
+        // Keep Last.fm's "loved tracks" aligned with the local decision; failures are
+        // surfaced through the scrobbler error channel rather than blocking the UI.
+        if self.hub.cfg.is_authorized() {
+            let lf = self.hub.lf.clone();
+            let art = artist.clone();
+            let trk = title.clone();
+            let action = final_action.to_string();
+            self.hub.rt.spawn(async move {
+                match action.as_str() {
+                    "like" => {
+                        let _ = lf.love(&art, &trk).await;
+                    }
+                    "remove" => {
+                        let _ = lf.unlove(&art, &trk).await;
+                    }
+                    _ => {}
+                }
+            });
+        }
+
         self.feedback_list = self.hub.db.get_feedback_list(200);
         self.show_toast(toast_msg, cx);
     }
@@ -783,6 +837,16 @@ impl ConsoleView {
                                 "工作模式".to_string()
                             }),
                     )
+                    // Scrobble failures used to pile up invisibly behind the pending count;
+                    // the sidebar now carries the reason (full text lives in Settings).
+                    .children(self.state.last_error.as_ref().map(|err| {
+                        div()
+                            .id("sidebar-scrobble-error")
+                            .px_1()
+                            .text_size(px(10.))
+                            .text_color(rgb(0xf85149))
+                            .child(format!("⚠️ 打卡失败：{}", ellipsize(err, 32)))
+                    }))
                     .child(
                         div()
                             .flex()
@@ -883,6 +947,7 @@ impl ConsoleView {
     fn render_now_playing_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let now_opt = self.state.now.as_ref();
         let has_song = now_opt.is_some();
+        let is_liked = self.now_feedback.as_deref() == Some("like");
 
         let (title, artist_album, pos_ms, dur_ms, ratio, thr_pct, badge_text, badge_color) =
             if let Some(n) = now_opt {
@@ -1113,13 +1178,24 @@ impl ConsoleView {
                             .px_3()
                             .py_1p5()
                             .rounded_md()
-                            .cursor_pointer()
-                            .bg(rgb(0x21262d))
+                            .bg(if is_liked {
+                                rgba(0xe8414226)
+                            } else {
+                                rgb(0x21262d)
+                            })
                             .border_1()
-                            .border_color(rgb(0x30363d))
+                            .border_color(if is_liked {
+                                rgb(0xe84142)
+                            } else {
+                                rgb(0x30363d)
+                            })
                             .hover(|s| s.bg(rgb(0x30363d)))
                             .text_color(if has_song {
-                                rgb(0xe6edf3)
+                                if is_liked {
+                                    rgb(0xff9b9c)
+                                } else {
+                                    rgb(0xe6edf3)
+                                }
                             } else {
                                 rgb(0x6e7681)
                             })
@@ -1128,26 +1204,13 @@ impl ConsoleView {
                                 let Some(n) = this.state.now.clone() else {
                                     return;
                                 };
-                                this.hub.db.set_feedback(&n.title, &n.artist, "like");
-                                if this.hub.cfg.is_authorized() {
-                                    let lf = this.hub.lf.clone();
-                                    let art = n.artist.clone();
-                                    let trk = n.title.clone();
-                                    this.hub.rt.spawn(async move {
-                                        let _ = lf.love(&art, &trk).await;
-                                    });
-                                    this.show_toast(
-                                        format!("❤️ 已同步红心至 Last.fm 与本地喜欢：{}", n.title),
-                                        cx,
-                                    );
-                                } else {
-                                    this.show_toast(
-                                        format!("❤️ 已加入本地真爱喜欢：{}", n.title),
-                                        cx,
-                                    );
-                                }
+                                this.toggle_feedback_item(n.title, n.artist, "like", cx);
                             }))
-                            .child("❤️ 红心"),
+                            .child(if is_liked {
+                                "💔 取消红心"
+                            } else {
+                                "❤️ 红心"
+                            }),
                     ),
             )
     }
@@ -2911,6 +2974,36 @@ impl ConsoleView {
             .flex()
             .flex_col()
             .gap_4()
+            // A failing queue silently inflates the pending count on this page; say why.
+            .children(self.state.last_error.as_ref().map(|err| {
+                div()
+                    .id("recent-scrobble-error")
+                    .w_full()
+                    .p_3()
+                    .rounded_lg()
+                    .bg(rgba(0xf8514920))
+                    .border_1()
+                    .border_color(rgba(0xf8514955))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xff7b72))
+                            .child(format!(
+                                "⚠️ Last.fm 打卡队列受阻（{} 首等待重试）",
+                                self.state.pending
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(rgb(0xe6edf3))
+                            .child(err.clone()),
+                    )
+            }))
             .child(
                 div()
                     .w_full()
@@ -3459,6 +3552,42 @@ impl ConsoleView {
                                     }),
                             ),
                     )
+                    // Full, un-truncated failure reason plus what the user can do about it.
+                    .children(self.state.last_error.as_ref().map(|err| {
+                        div()
+                            .id("settings-scrobble-error")
+                            .w_full()
+                            .p_2p5()
+                            .rounded_md()
+                            .bg(rgba(0xf8514920))
+                            .border_1()
+                            .border_color(rgba(0xf8514955))
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(0xff7b72))
+                                    .child("⚠️ Last.fm 打卡失败"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(rgb(0xe6edf3))
+                                    .child(err.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(rgb(0x8b949e))
+                                    .child(format!(
+                                        "{} 首仍在队列中，恢复网络或检查 Key 后会自动重试。",
+                                        self.state.pending
+                                    )),
+                            )
+                    }))
                     .child(
                         div()
                             .flex()
@@ -4174,7 +4303,28 @@ pub fn run_console_loop(
                     let needs_notify = state_changed || cover_changed || focus_changed;
 
                     if state_changed {
+                        let username_changed =
+                            view.state.config.username != new_state.config.username;
+                        let track_changed = view.state.now.as_ref().map(|n| n.play_id)
+                            != new_state.now.as_ref().map(|n| n.play_id);
                         view.state = new_state;
+
+                        // OAuth finishes in the browser and writes the username back through
+                        // the HTTP callback, so pull it into the settings field instead of
+                        // leaving the form showing the pre-authorisation text.
+                        if username_changed {
+                            let name = view.state.config.username.clone();
+                            view.username_input
+                                .update(cx, |input, cx| input.set_text(name, cx));
+                        }
+                        // The heart belongs to the playing track: re-read it on track change.
+                        if track_changed {
+                            view.now_feedback = view
+                                .state
+                                .now
+                                .as_ref()
+                                .and_then(|n| view.hub.db.get_feedback(&n.title, &n.artist));
+                        }
                     }
                     if cover_changed {
                         view.now_cover_key = cur_cover;
@@ -4211,4 +4361,20 @@ pub fn run_console_loop(
         })
         .detach();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ellipsize;
+
+    #[test]
+    fn test_ellipsize_keeps_whole_characters() {
+        assert_eq!(ellipsize("短消息", 10), "短消息");
+        assert_eq!(ellipsize("1234567890", 4), "1234…");
+        // Truncation never splits a multi-byte scalar.
+        assert_eq!(ellipsize("打卡失败打卡失败", 4), "打卡失败…");
+        // Newlines are flattened so the message fits a single row.
+        assert_eq!(ellipsize("line1\nline2", 20), "line1 line2");
+        assert_eq!(ellipsize("", 5), "");
+    }
 }
