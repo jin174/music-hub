@@ -23,6 +23,24 @@ fn main() {
     </dependency>
 </assembly>"#,
         );
-        let _ = res.compile();
+        if let Err(err) = res.compile() {
+            println!("cargo:warning=winres failed: {err}");
+        }
+
+        // winres only emits `cargo:rustc-link-lib=dylib=resource`, and the MSVC linker
+        // does not pull a resource-only archive in through -l on this toolchain: the
+        // binary shipped with no icon, no version info and — critically — no manifest,
+        // so comctl32 v6 was never activated and the TaskDialogIndirect import pulled
+        // in by the gpui dependency chain failed at load time with "entry point not
+        // found". Hand the archive to the linker for the binary target explicitly.
+        let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR is set for build scripts");
+        let resource_lib = std::path::Path::new(&out_dir).join("resource.lib");
+        if resource_lib.exists() {
+            println!("cargo:rustc-link-arg-bins={}", resource_lib.display());
+        } else {
+            println!(
+                "cargo:warning=resource.lib was not produced; the binary will have no icon, version info or manifest"
+            );
+        }
     }
 }
