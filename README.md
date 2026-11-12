@@ -44,9 +44,9 @@
 ## 🚀 运行与构建
 
 ### 直接运行单文件版
-1. 双击根目录下的 `MusicHub.exe`（仅约 6.9MB，无任何外部运行库依赖）。
-2. 右下角系统托盘会出现音符图标 `🎵`，灵动岛悬浮挂件与 Web 控制台均已就绪。
-3. 浏览器控制台：**http://127.0.0.1:8765**。
+1. 双击根目录下的 `MusicHub.exe`（约 12MB，无任何外部运行库依赖）。
+2. 右下角系统托盘会出现音符图标 `🎵`；原生控制台窗口与灵动岛悬浮挂件均已就绪。
+3. 关闭控制台窗口只是隐藏，程序仍在托盘常驻：点托盘图标或灵动岛上的 ⤢ 即可原样唤回（内存里的雷达/漫游结果、输入框内容都不会丢）。
 
 ### 命令行参数
 - `MusicHub.exe --mini`：启动并直接显示桌面灵动岛悬浮挂件。
@@ -66,9 +66,10 @@ cargo build --release
 ```text
 music-hub/
 ├── Cargo.toml         # 依赖与发布优化（LTO、体积裁切、Win32 API）
-├── build.rs           # 编译期自动嵌入 Windows 图标与元信息
+├── build.rs           # 编译期嵌入 Windows 图标、元信息与 PerMonitorV2 DPI 清单
 ├── src/
 │   ├── main.rs        # 单实例 Mutex、CLI 参数解析、Tokio 运行时
+│   ├── lib.rs         # 库入口（供 tests/ 复用整套实现）
 │   ├── config.rs      # data/config.json 线程安全配置与原子写入
 │   ├── db.rs          # SQLite WAL 模式，听歌/推荐/反馈表与统计查询
 │   ├── normalize.rs   # Unicode 字符清洗、歌手别名拆分、版本剥离
@@ -76,14 +77,27 @@ music-hub/
 │   ├── lastfm.rs      # Last.fm MD5 签名授权、Scrobble 打卡与协同过滤
 │   ├── scrobbler.rs   # 后台常驻离线打卡队列（14 天超期保护）
 │   ├── monitor.rs     # Windows SMTC 监听状态机 + QQ 音乐窗口兜底
-│   ├── server.rs      # Axum 高性能 HTTP 服务，内嵌 index.html
+│   ├── server.rs      # 本地 HTTP 服务（仅 OAuth 回调与单实例唤起）
+│   ├── app.rs         # 中枢协调器：状态聚合、雷达与漫游合成
+│   ├── poster.rs      # Win32 GDI 听歌名片海报渲染
 │   ├── tray.rs        # Win32 原生托盘图标 (Shell_NotifyIconW)
-│   └── widget.rs      # 原生 Win32 灵动岛悬浮挂件 (UpdateLayeredWindow + tiny-skia)
-├── web/
-│   ├── index.html     # 控制台单文件前端（已编译期嵌入）
-│   └── mini.html      # 备用 Web 挂件网页
+│   ├── widget.rs      # 原生 Win32 灵动岛悬浮挂件 (UpdateLayeredWindow + tiny-skia)
+│   └── ui/
+│       ├── mod.rs     # GPUI 原生控制台：五个页签、底栏、海报弹窗、重绘门控
+│       └── input.rs   # 自绘 TextInput：水平滚动、Tab 焦点、grapheme 掩码
+├── tests/             # 四层自动化测试（feature / boundary / pairwise / scenario）
+├── web/               # v2.0 之前的网页控制台（现由原生 GPUI 控制台取代，保留备查）
 └── legacy_python/     # 历史 Python 代码归档（已打 Git 标签 python-legacy-v1.2）
 ```
+
+## 🛠 v2.1 修复与打磨（R1–R4）
+
+- **生命周期与实时性**：控制台改为单次 `Application::run` 常驻——关窗只隐藏，托盘/灵动岛唤回不重建窗口、不丢内存状态；SMTC 迟到封面按 `cover_bytes` 长度判重并补解码；重绘按状态变更门控，空闲 0 刷新；封面下载带 3s 连接 / 5s 总超时与 8MiB 体积上限。
+- **状态同步与错误可见**：Last.fm 打卡失败在侧栏、最近播放页、设置页三处直接可见（含待重试数量与处理建议）；底栏红心与雷达、漫游、黑名单内存列表 + SQLite + Last.fm 三向同步；网页授权完成后用户名自动回填输入框。
+- **输入框**：长文本水平滚动且光标始终可见；`Tab` / `Shift-Tab` 在字段间切换焦点；设置页按 `Enter` 直接保存；密码框按 grapheme 掩码，emoji 与组合字符不会让光标错位。
+- **交互与视觉**：900×600 最小窗口下工具栏自动换行不重叠；海报弹窗支持点击背景与 `Esc` 关闭；删除历史记录需二次确认（4 秒内有效）；雷达/漫游补空态、播放动作补 toast、歌手行补 hover、无曲目时底栏按钮不再显示手型光标；海报完播率按真实数据计算，并清除 GDI 不支持的 emoji（含兜底过滤）；标题栏跟随 `#0d1117` 暗色主题，灵动岛按 PerMonitorV2 DPI 缩放并响应 `WM_DPICHANGED`。
+
+---
 
 ## 💡 灵感来源与致谢 (Inspiration & Acknowledgements)
 

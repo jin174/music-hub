@@ -14,13 +14,16 @@
 
 | Test Target / Suite | Source Path | Test Category | Target Features | Tests Planned | Tests Passed | Tests Failed | Execution Time |
 |---|---|---|---|---|---|---|---|
-| **Library Unit Tests** | `src/lib.rs` | Unit Tests | Baseline DB, Normalization & Milestone Derives | 9 | 9 | 0 | 0.01s |
-| **Binary Unit Tests** | `src/main.rs` | Unit Tests | Baseline DB, Normalization & Milestone Derives | 9 | 9 | 0 | 0.01s |
+| **Library Unit Tests** | `src/lib.rs` | Unit Tests | Baseline DB / config / normalize, plus M2 `DB::get_feedback`, console `ellipsize`, and M3 mask / offset mapping | 14 | 14 | 0 | 0.01s |
+| **Binary Unit Tests** | `src/main.rs` | Unit Tests | Same modules compiled into the binary crate | 14 | 14 | 0 | 0.01s |
 | **Tier 1: Feature Tests** | `tests/tier1_feature_tests.rs` | Category-Partition & Happy Path | F1–F15 (5 per feature) | 75 | 75 | 0 | 0.01s |
 | **Tier 2: Boundary Tests** | `tests/tier2_boundary_tests.rs` | Boundary Value Analysis & Edge Cases | F1–F15 (5 per feature) | 75 | 75 | 0 | 0.02s |
 | **Tier 3: Pairwise Tests** | `tests/tier3_pairwise_tests.rs` | Pairwise Combinatorial Interactions | F1–F15 Cross-Subsystem Pairs | 17 | 17 | 0 | 0.01s |
 | **Tier 4: Scenario Tests** | `tests/tier4_scenario_tests.rs` | End-to-End User Workflows | Realistic Daily Listening Sessions | 9 | 9 | 0 | 0.01s |
-| **TOTALS** | | **Full Automated Test Suite** | **F1–F15, R1–R4** | **194** | **194** | **0** | **< 1.0s** |
+| **TOTALS** | | **Full Automated Test Suite** | **F1–F15, R1–R4** | **204** | **204** | **0** | **< 1.0s** |
+
+> Verified after Milestones M1–M4 were implemented: `cargo check --all-targets` is clean and `cargo test` passes 204/204.
+> The 5 unit tests added in M2/M3 (`test_get_feedback_single_track_lookup`, `test_ellipsize_keeps_whole_characters`, `mask_emits_one_bullet_per_grapheme`, `display_and_content_offsets_round_trip`, `offsets_stay_within_bounds`) exercise production code directly; the tier suites remain requirement-level specifications.
 
 ---
 
