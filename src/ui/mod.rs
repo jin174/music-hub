@@ -308,6 +308,22 @@ impl ConsoleView {
                 this.run_radar(cx);
             }
         });
+        // Settings fields submit on Enter as well as through their buttons.
+        let sub3 = cx.subscribe(&username_input, |this, _, ev: &InputEvent, cx| {
+            if matches!(ev, InputEvent::EnterPressed) {
+                this.save_lastfm_username(cx);
+            }
+        });
+        let sub4 = cx.subscribe(&api_key_input, |this, _, ev: &InputEvent, cx| {
+            if matches!(ev, InputEvent::EnterPressed) {
+                this.save_lastfm_credentials(cx);
+            }
+        });
+        let sub5 = cx.subscribe(&api_secret_input, |this, _, ev: &InputEvent, cx| {
+            if matches!(ev, InputEvent::EnterPressed) {
+                this.save_lastfm_credentials(cx);
+            }
+        });
 
         let toast = initial_toast.map(|msg| (msg, Instant::now()));
         if let Some((_, now)) = toast {
@@ -356,7 +372,7 @@ impl ConsoleView {
             importing_lastfm: false,
             feedback_list,
             toast,
-            _subscriptions: vec![sub1, sub2],
+            _subscriptions: vec![sub1, sub2, sub3, sub4, sub5],
         }
     }
 
@@ -379,6 +395,30 @@ impl ConsoleView {
             });
         })
         .detach();
+    }
+
+    /// Persist the username typed into Settings. Shared by the button and the field's
+    /// `Enter` key so both paths behave identically.
+    fn save_lastfm_username(&mut self, cx: &mut Context<Self>) {
+        let u = self.username_input.read(cx).text().trim().to_string();
+        self.hub.cfg.update(|d| d.username = u.clone());
+        self.show_toast(format!("✅ 已保存 Last.fm 用户名：{}", u), cx);
+    }
+
+    /// Persist API key / shared secret from Settings (button and `Enter` both land here).
+    fn save_lastfm_credentials(&mut self, cx: &mut Context<Self>) {
+        let k = self.api_key_input.read(cx).text().trim().to_string();
+        let s = self.api_secret_input.read(cx).text().trim().to_string();
+        self.hub.cfg.update(|d| {
+            if k != d.api_key {
+                d.api_key = k;
+                d.session_key.clear();
+            }
+            if !s.is_empty() {
+                d.api_secret = s;
+            }
+        });
+        self.show_toast("✅ 已保存 Key 与 Secret，请点击「前往 Last.fm 网页授权」", cx);
     }
 
     pub fn switch_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
@@ -3423,12 +3463,7 @@ impl ConsoleView {
                                     .flex()
                                     .items_center()
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        let u = this.username_input.read(cx).text().trim().to_string();
-                                        this.hub.cfg.update(|d| d.username = u.clone());
-                                        this.show_toast(
-                                            format!("✅ 已保存 Last.fm 用户名：{}", u),
-                                            cx,
-                                        );
+                                        this.save_lastfm_username(cx);
                                     }))
                                     .child("保存用户名"),
                             )
@@ -3639,21 +3674,7 @@ impl ConsoleView {
                                     .text_color(rgb(0xffffff))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        let k = this.api_key_input.read(cx).text().trim().to_string();
-                                        let s = this.api_secret_input.read(cx).text().trim().to_string();
-                                        this.hub.cfg.update(|d| {
-                                            if k != d.api_key {
-                                                d.api_key = k;
-                                                d.session_key.clear();
-                                            }
-                                            if !s.is_empty() {
-                                                d.api_secret = s;
-                                            }
-                                        });
-                                        this.show_toast(
-                                            "✅ 已保存 Key 与 Secret，请点击「前往 Last.fm 网页授权」",
-                                            cx,
-                                        );
+                                        this.save_lastfm_credentials(cx);
                                     }))
                                     .child("保存 Key"),
                             )

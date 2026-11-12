@@ -3,7 +3,7 @@ use std::ops::Range;
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size, App, Bounds,
     ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla, KeyBinding,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
     ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
 };
@@ -26,6 +26,8 @@ actions!(
         Cut,
         Copy,
         Enter,
+        TabNext,
+        TabPrev,
     ]
 );
 
@@ -44,6 +46,8 @@ pub fn bind_input_keys(cx: &mut App) {
         KeyBinding::new("home", Home, Some("TextInput")),
         KeyBinding::new("end", End, Some("TextInput")),
         KeyBinding::new("enter", Enter, Some("TextInput")),
+        KeyBinding::new("tab", TabNext, Some("TextInput")),
+        KeyBinding::new("shift-tab", TabPrev, Some("TextInput")),
     ]);
 }
 
@@ -65,6 +69,54 @@ pub struct TextInput {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    /// Horizontal translation applied when the shaped text is wider than the field,
+    /// clamped on every frame so the caret stays inside the visible area.
+    scroll_offset: Pixels,
+}
+
+/// One bullet per grapheme cluster is used for password fields.
+const MASK_CHAR: char = '•';
+const MASK_BYTES: usize = MASK_CHAR.len_utf8();
+
+/// Password mask for a whole field: one bullet per grapheme cluster, so a ZWJ emoji
+/// or a combining accent is not split into several bullets.
+fn mask_graphemes(content: &str) -> String {
+    let mut masked = String::new();
+    for _ in content.graphemes(true) {
+        masked.push(MASK_CHAR);
+    }
+    masked
+}
+
+/// Content byte offset -> shaped byte offset (identity for plain text fields).
+fn to_display_offset(content: &str, masked: bool, offset: usize) -> usize {
+    let offset = offset.min(content.len());
+    if !masked || content.is_empty() {
+        return offset;
+    }
+    let mut display = 0;
+    for (idx, _) in content.grapheme_indices(true) {
+        if idx >= offset {
+            break;
+        }
+        display += MASK_BYTES;
+    }
+    display
+}
+
+/// Shaped byte offset -> content byte offset, always landing on a cluster boundary.
+fn from_display_offset(content: &str, masked: bool, offset: usize) -> usize {
+    if !masked || content.is_empty() {
+        return offset.min(content.len());
+    }
+    let mut display = 0;
+    for (idx, _) in content.grapheme_indices(true) {
+        if display >= offset {
+            return idx;
+        }
+        display += MASK_BYTES;
+    }
+    content.len()
 }
 
 impl TextInput {
@@ -77,7 +129,8 @@ impl TextInput {
         let content: SharedString = initial.into();
         let placeholder: SharedString = placeholder.into();
         cx.new(|cx| Self {
-            focus_handle: cx.focus_handle(),
+            // Every text field is a tab stop so `Tab` / `Shift-Tab` can cycle the form.
+            focus_handle: cx.focus_handle().tab_stop(true),
             content,
             placeholder,
             is_password,
@@ -87,6 +140,7 @@ impl TextInput {
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
+            scroll_offset: px(0.),
         })
     }
 
@@ -100,25 +154,30 @@ impl TextInput {
         self.selected_range = len..len;
         self.selection_reversed = false;
         self.marked_range = None;
+        self.scroll_offset = px(0.);
         cx.notify();
     }
 
+    /// The text that is actually shaped. Password fields replace every grapheme
+    /// cluster with a single bullet, so the shaped length differs from the content
+    /// length for anything non-ASCII and all indices crossing into the layout have to
+    /// be translated through [`Self::to_display_offset`] / [`Self::from_display_offset`].
     fn display_string(&self) -> SharedString {
         if self.is_password && !self.content.is_empty() {
-            // Preserve exact UTF-8 byte length per character so cursor/selection byte offsets stay 1:1
-            let mut masked = String::with_capacity(self.content.len());
-            for ch in self.content.chars() {
-                match ch.len_utf8() {
-                    1 => masked.push('*'),
-                    2 => masked.push('·'),
-                    3 => masked.push('•'),
-                    _ => masked.push_str("****"),
-                }
-            }
-            masked.into()
+            mask_graphemes(&self.content).into()
         } else {
             self.content.clone()
         }
+    }
+
+    /// Content byte offset -> shaped byte offset.
+    fn to_display_offset(&self, content_offset: usize) -> usize {
+        to_display_offset(&self.content, self.is_password, content_offset)
+    }
+
+    /// Shaped byte offset -> content byte offset, always landing on a cluster boundary.
+    fn from_display_offset(&self, display_offset: usize) -> usize {
+        from_display_offset(&self.content, self.is_password, display_offset)
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -160,6 +219,14 @@ impl TextInput {
 
     fn enter(&mut self, _: &Enter, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(InputEvent::EnterPressed);
+    }
+
+    fn tab_next(&mut self, _: &TabNext, window: &mut Window, _: &mut Context<Self>) {
+        window.focus_next();
+    }
+
+    fn tab_prev(&mut self, _: &TabPrev, window: &mut Window, _: &mut Context<Self>) {
+        window.focus_prev();
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -261,8 +328,10 @@ impl TextInput {
         if position.y > bounds.bottom() {
             return self.content.len();
         }
-        line.closest_index_for_x(position.x - bounds.left())
-            .min(self.content.len())
+        let display_index = line
+            .closest_index_for_x(position.x - bounds.left() + self.scroll_offset)
+            .min(line.len());
+        self.from_display_offset(display_index)
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -431,13 +500,15 @@ impl EntityInputHandler for TextInput {
     ) -> Option<Bounds<Pixels>> {
         let last_layout = self.last_layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
+        let start = self.to_display_offset(range.start);
+        let end = self.to_display_offset(range.end);
         Some(Bounds::from_corners(
             point(
-                bounds.left() + last_layout.x_for_index(range.start),
+                bounds.left() + last_layout.x_for_index(start) - self.scroll_offset,
                 bounds.top(),
             ),
             point(
-                bounds.left() + last_layout.x_for_index(range.end),
+                bounds.left() + last_layout.x_for_index(end) - self.scroll_offset,
                 bounds.bottom(),
             ),
         ))
@@ -451,7 +522,9 @@ impl EntityInputHandler for TextInput {
     ) -> Option<usize> {
         let line_point = self.last_bounds?.localize(&point)?;
         let last_layout = self.last_layout.as_ref()?;
-        let utf8_index = last_layout.index_for_x(point.x - line_point.x)?;
+        let display_index =
+            last_layout.index_for_x(point.x - line_point.x + self.scroll_offset)?;
+        let utf8_index = self.from_display_offset(display_index);
         Some(self.offset_to_utf16(utf8_index.min(self.content.len())))
     }
 }
@@ -464,6 +537,7 @@ struct PrepaintState {
     line: Option<ShapedLine>,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
+    scroll: Pixels,
 }
 
 impl IntoElement for TextElement {
@@ -508,92 +582,133 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let input = self.input.read(cx);
-        let content = input.display_string();
-        let selected_range = input.selected_range.clone();
-        let cursor = input.cursor_offset();
         let style = window.text_style();
-
-        let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), rgb(0x6e7681).into())
-        } else {
-            (content, rgb(0xe6edf3).into())
-        };
-
-        let run = TextRun {
-            len: display_text.len(),
-            font: style.font(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        let runs = if let Some(marked_range) = input.marked_range.as_ref() {
-            vec![
-                TextRun {
-                    len: marked_range.start,
-                    ..run.clone()
-                },
-                TextRun {
-                    len: marked_range.end - marked_range.start,
-                    underline: Some(UnderlineStyle {
-                        color: Some(run.color),
-                        thickness: px(1.0),
-                        wavy: false,
-                    }),
-                    ..run.clone()
-                },
-                TextRun {
-                    len: display_text.len().saturating_sub(marked_range.end),
-                    ..run
-                },
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect()
-        } else {
-            vec![run]
-        };
-
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let line = window
-            .text_system()
-            .shape_line(display_text, font_size, &runs, None);
+        let margin = px(6.);
 
-        let cursor_pos = line.x_for_index(cursor);
-        let (selection, cursor) = if selected_range.is_empty() {
-            (
-                None,
-                Some(fill(
-                    Bounds::new(
-                        point(bounds.left() + cursor_pos, bounds.top()),
-                        size(px(1.5), bounds.bottom() - bounds.top()),
-                    ),
-                    rgb(0xe84142),
-                )),
-            )
-        } else {
-            (
-                Some(fill(
-                    Bounds::from_corners(
-                        point(
-                            bounds.left() + line.x_for_index(selected_range.start),
-                            bounds.top(),
+        let (line, cursor, selection, scroll) = {
+            let input = self.input.read(cx);
+            let shaped = input.display_string();
+            let cursor = input.to_display_offset(input.cursor_offset());
+            let selected_range = input.to_display_offset(input.selected_range.start)
+                ..input.to_display_offset(input.selected_range.end);
+            let marked_range = input
+                .marked_range
+                .clone()
+                .map(|r| input.to_display_offset(r.start)..input.to_display_offset(r.end));
+
+            let (display_text, text_color): (SharedString, Hsla) = if shaped.is_empty() {
+                (input.placeholder.clone(), rgb(0x6e7681).into())
+            } else {
+                (shaped, rgb(0xe6edf3).into())
+            };
+
+            let run = TextRun {
+                len: display_text.len(),
+                font: style.font(),
+                color: text_color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let runs = if let Some(marked_range) = marked_range.as_ref() {
+                vec![
+                    TextRun {
+                        len: marked_range.start,
+                        ..run.clone()
+                    },
+                    TextRun {
+                        len: marked_range.end - marked_range.start,
+                        underline: Some(UnderlineStyle {
+                            color: Some(run.color),
+                            thickness: px(1.0),
+                            wavy: false,
+                        }),
+                        ..run.clone()
+                    },
+                    TextRun {
+                        len: display_text.len().saturating_sub(marked_range.end),
+                        ..run
+                    },
+                ]
+                .into_iter()
+                .filter(|run| run.len > 0)
+                .collect()
+            } else {
+                vec![run]
+            };
+
+            let line = window
+                .text_system()
+                .shape_line(display_text, font_size, &runs, None);
+
+            // Keep the caret inside the viewport. The shaped line can be wider than the
+            // field, which used to clip trailing characters with no way to reach them.
+            let available = bounds.size.width;
+            let cursor_x = line.x_for_index(cursor);
+            let mut scroll = input.scroll_offset;
+            if cursor_x < scroll + margin {
+                scroll = cursor_x - margin;
+            } else if cursor_x > scroll + available - margin {
+                scroll = cursor_x - available + margin;
+            }
+            let max_scroll = {
+                let total = line.width;
+                if total > available {
+                    total - available
+                } else {
+                    px(0.)
+                }
+            };
+            if scroll < px(0.) {
+                scroll = px(0.);
+            }
+            if scroll > max_scroll {
+                scroll = max_scroll;
+            }
+
+            let (selection, cursor) = if selected_range.is_empty() {
+                (
+                    None,
+                    Some(fill(
+                        Bounds::new(
+                            point(bounds.left() + cursor_x - scroll, bounds.top()),
+                            size(px(1.5), bounds.bottom() - bounds.top()),
                         ),
-                        point(
-                            bounds.left() + line.x_for_index(selected_range.end),
-                            bounds.bottom(),
+                        rgb(0xe84142),
+                    )),
+                )
+            } else {
+                (
+                    Some(fill(
+                        Bounds::from_corners(
+                            point(
+                                bounds.left() + line.x_for_index(selected_range.start) - scroll,
+                                bounds.top(),
+                            ),
+                            point(
+                                bounds.left() + line.x_for_index(selected_range.end) - scroll,
+                                bounds.bottom(),
+                            ),
                         ),
-                    ),
-                    rgba(0xe8414244),
-                )),
-                None,
-            )
+                        rgba(0xe8414244),
+                    )),
+                    None,
+                )
+            };
+
+            (line, cursor, selection, scroll)
         };
+
+        self.input.update(cx, |input, _| {
+            input.scroll_offset = scroll;
+        });
+
         PrepaintState {
             line: Some(line),
             cursor,
             selection,
+            scroll,
         }
     }
 
@@ -617,7 +732,12 @@ impl Element for TextElement {
             window.paint_quad(selection);
         }
         let line = prepaint.line.take().unwrap();
-        let _ = line.paint(bounds.origin, window.line_height(), window, cx);
+        let _ = line.paint(
+            point(bounds.origin.x - prepaint.scroll, bounds.origin.y),
+            window.line_height(),
+            window,
+            cx,
+        );
 
         if focus_handle.is_focused(window) {
             if let Some(cursor) = prepaint.cursor.take() {
@@ -664,6 +784,8 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
             .on_action(cx.listener(Self::enter))
+            .on_action(cx.listener(Self::tab_next))
+            .on_action(cx.listener(Self::tab_prev))
             .on_action(cx.listener(Self::show_character_palette))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::cut))
@@ -682,5 +804,50 @@ impl Render for TextInput {
 impl Focusable for TextInput {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_emits_one_bullet_per_grapheme() {
+        assert_eq!(mask_graphemes("abc"), "•••");
+        assert_eq!(mask_graphemes("中文字"), "•••");
+        // A ZWJ family emoji is one cluster even though it holds several scalars.
+        assert_eq!(mask_graphemes("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"), "•");
+        // e + combining acute accent is one cluster, not two.
+        assert_eq!(mask_graphemes("e\u{301}"), "•");
+        assert_eq!(mask_graphemes(""), "");
+    }
+
+    #[test]
+    fn display_and_content_offsets_round_trip() {
+        // "a中b": 1 + 3 + 1 bytes, three clusters, shaped as nine bytes.
+        let content = "a中b";
+        assert_eq!(to_display_offset(content, true, 0), 0);
+        assert_eq!(to_display_offset(content, true, 1), 3);
+        assert_eq!(to_display_offset(content, true, 4), 6);
+        assert_eq!(to_display_offset(content, true, 5), 9);
+
+        assert_eq!(from_display_offset(content, true, 0), 0);
+        assert_eq!(from_display_offset(content, true, 3), 1);
+        // An offset inside a cluster snaps forward to the next cluster boundary.
+        assert_eq!(from_display_offset(content, true, 4), 4);
+        assert_eq!(from_display_offset(content, true, 9), 5);
+
+        // Plain text fields are the identity mapping.
+        assert_eq!(to_display_offset(content, false, 4), 4);
+        assert_eq!(from_display_offset(content, false, 4), 4);
+    }
+
+    #[test]
+    fn offsets_stay_within_bounds() {
+        let content = "短";
+        assert_eq!(to_display_offset(content, true, 999), 3);
+        assert_eq!(from_display_offset(content, true, 999), 3);
+        assert_eq!(to_display_offset("", true, 5), 0);
+        assert_eq!(from_display_offset("", true, 5), 0);
     }
 }
