@@ -108,6 +108,36 @@ fn decode_bytes_to_render_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     ))))
 }
 
+// Cover downloads sit on the 500 ms console poll path, so they must never stall
+// the UI for long: bound connect/total time and refuse oversized payloads instead
+// of buffering whatever the CDN returns.
+const COVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const COVER_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+const COVER_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+fn cover_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+            ),
+        );
+        headers.insert(
+            reqwest::header::REFERER,
+            reqwest::header::HeaderValue::from_static("https://music.163.com/"),
+        );
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .connect_timeout(COVER_CONNECT_TIMEOUT)
+            .timeout(COVER_FETCH_TIMEOUT)
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 async fn fetch_cover_render_image(cover_str: &str) -> Option<Arc<RenderImage>> {
     if cover_str.is_empty() {
         return None;
@@ -125,8 +155,17 @@ async fn fetch_cover_render_image(cover_str: &str) -> Option<Arc<RenderImage>> {
         } else {
             cover_str.to_string()
         };
-        let resp = reqwest::get(&url).await.ok()?;
+        let resp = cover_http_client().get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        if resp.content_length().is_some_and(|len| len > COVER_MAX_BYTES) {
+            return None;
+        }
         let bytes = resp.bytes().await.ok()?;
+        if bytes.len() as u64 > COVER_MAX_BYTES {
+            return None;
+        }
         return decode_bytes_to_render_image(&bytes);
     }
     None
